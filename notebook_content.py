@@ -2,10 +2,11 @@ import aiohttp
 import asyncio
 import json
 
-#Server url
+# Server url
 server = "https://api.artifactsmmo.com"
-#Your account token (https://artifactsmmo.com/account)
+# Your account token (https://artifactsmmo.com/account)
 token = "XXX"
+# Name of your character
 cooldown = 3
 
 def handle_incorrect_status_code(_status_code: int, _character: str = 'N/A') -> int:
@@ -35,13 +36,13 @@ async def get_items_infos(session: aiohttp.ClientSession, item_code: str) -> lis
   url = f"{server}/items/{item_code}"
   headers = await get_headers(token)
 
-  async with session.post(url, headers=headers) as response:
-      if response.status != 200:
-          r = handle_incorrect_status_code(response.status)
-          return r
-      else:
-          data = await response.json()
-          return data["data"]
+  async with session.get(url, headers=headers) as response:
+    if response.status != 200:
+      r = handle_incorrect_status_code(response.status)
+      return r
+    else:
+      data = await response.json()
+      return data["data"]
 
 async def get_craft_details(session: aiohttp.ClientSession, _item_code: str) -> list:
   items_infos = await get_items_infos(session, _item_code)
@@ -137,21 +138,7 @@ scenarii = {
     ]
 }
 
-# while True
-# check woodcutting_level
-# According to level, select the place with skill=='woodcutting'
-# if lvl < 10 -> cutting_location = ash wood, crafted_material = ash plank,
-# elif lvl < 20 -> ...
-# else -> ...
-# while inventory has free space
-#   go to cutting_location
-#   gather
-# go to Woodcutting location
-# craft (-> plank)
-# go to bank
-# deposit
 
-# global > server, token
 class Character:
 
   def __init__(self, name: str, session: aiohttp.ClientSession):
@@ -205,7 +192,7 @@ class Character:
             return r
         else:
             data = await response.json()
-            print(f'Move of {self.name}. Cooldown: {data["data"]["cooldown"]["total_seconds"]}')
+            print(f'{self.name} > Move to ({x}, {y}). Cooldown: {data["data"]["cooldown"]["total_seconds"]}')
 
             # Return the cooldown in seconds
             return data["data"]["cooldown"]["total_seconds"]
@@ -219,7 +206,7 @@ class Character:
             }
         )
     if len(resource_locations) == 0:
-      print(f'No resource {content_code} on this map')
+      print(f'{self.name} > No resource {content_code} on this map')
       return (0, 0)
     
     if len(resource_locations) == 1:
@@ -236,7 +223,7 @@ class Character:
     return (nearest_resource['x'], nearest_resource['y'])
 
   async def get_inventory_quantity(self, _item_code: str) -> dict[str, int]:
-    character_infos = await self.get_character_infos()
+    character_infos = await self.get_infos()
     for item_infos in character_infos['inventory']:
       if item_infos['code'] == _item_code:
         return item_infos['quantity']
@@ -246,9 +233,9 @@ class Character:
     nb_craftable_items = 99999
     craft_details = await get_craft_details(self.session, _item_code)
     for craft_material, required_quantity in craft_details:
-      print(f'ingredient: {craft_material} and qty {required_quantity}')
+      print(f'{self.name} > ingredient: {craft_material} and qty {required_quantity}')
       available_material_qty = await self.get_inventory_quantity(craft_material)
-      print(f'available {craft_material} for {self.name}: {available_material_qty}')
+      print(f'{self.name} > available {craft_material}: {available_material_qty}')
       n = available_material_qty//required_quantity
       nb_craftable_items = min(nb_craftable_items, n)
     return nb_craftable_items
@@ -268,7 +255,7 @@ class Character:
             return -1
         else:
             data = await response.json()
-            print(f'{quantity} {item_code} déposés par {self.name}. Cooldown: {data["data"]["cooldown"]["total_seconds"]}')
+            print(f'{self.name} > {quantity} {item_code} deposited. Cooldown: {data["data"]["cooldown"]["total_seconds"]}')
 
             # Return the cooldown in seconds
             return data["data"]["cooldown"]["total_seconds"]
@@ -287,7 +274,7 @@ class Character:
             return -1
         else:
             data = await response.json()
-            print(f'{self.name}  won. Cooldown: {data["data"]["cooldown"]["total_seconds"]}')
+            print(f'{self.name} > {qte} {item_code} crafted. Cooldown: {data["data"]["cooldown"]["total_seconds"]}')
 
             # Return the cooldown in seconds
             return data["data"]["cooldown"]["total_seconds"]
@@ -302,7 +289,7 @@ class Character:
             return -1
         else:
             data = await response.json()
-            print(f'{self.name}  won. Cooldown: {data["data"]["cooldown"]["total_seconds"]}')
+            print(f'{self.name} won. Cooldown: {data["data"]["cooldown"]["total_seconds"]}')
 
             # Return the cooldown in seconds
             return data["data"]["cooldown"]["total_seconds"]
@@ -317,7 +304,7 @@ class Character:
             return -1
         else:
             data = await response.json()
-            print(f'Resource gathered by {self.name}. Cooldown: {data["data"]["cooldown"]["total_seconds"]}')
+            print(f'{self.name} > Resource gathered. Cooldown: {data["data"]["cooldown"]["total_seconds"]}')
 
             # Return the cooldown in seconds
             return data["data"]["cooldown"]["total_seconds"]
@@ -336,7 +323,7 @@ class Character:
             return -1
         else:
             data = await response.json()
-            print(f'{qte} {item_code} recycled by {self.name}. Cooldown: {data["data"]["cooldown"]["total_seconds"]}')
+            print(f'{self.name} > {qte} {item_code} recycled. Cooldown: {data["data"]["cooldown"]["total_seconds"]}')
 
             # Return the cooldown in seconds
             return data["data"]["cooldown"]["total_seconds"]
@@ -379,20 +366,20 @@ class Map:
 async def run_bot(session: aiohttp.ClientSession, character_name: str, skill_name: str, map_object: Map):
 
   character_object = Character(character_name, session)
-  # skill_name = 'woodcutting'
+
   while True:
 
     # GATHER
     # Get skill level
     skill_level = await character_object.get_skill_level(skill_name)
-    print(f'level of {skill_name} for {character_object.name}: {skill_level}')
+    print(f'{character_object.name} > level of {skill_name}: {skill_level}')
     # Look where the character can go to best express his skill
     location_details = await map_object.get_skill_location_details(level=skill_level, skill=skill_name)
     resource_location_code = location_details['code']
 
-    print(f'location of {skill_name} for {character_object.name}: {resource_location_code}')
+    print(f'{character_object.name} > location of {skill_name}: {resource_location_code}')
     first_resource = location_details['drops'][0]['code']
-    print(f'resource for {character_object.name}: {first_resource}')
+    print(f'{character_object.name} > resource: {first_resource}')
     # Move to the (TODO: nearest) wood location
     if await character_object.is_inventory_not_full():
       nearest_resource_coords = await character_object.get_nearest_coords(
@@ -416,7 +403,7 @@ async def run_bot(session: aiohttp.ClientSession, character_name: str, skill_nam
       content_type='workshop', 
       content_code=skill_name
       )
-    print(f'location of {skill_name} workshop for {character_object.name}: {nearest_workshop_coords}')
+    print(f'{character_object.name} > location of {skill_name} workshop: {nearest_workshop_coords}')
     cooldown = await character_object.move(*nearest_workshop_coords)
     await asyncio.sleep(cooldown)
 
@@ -424,7 +411,7 @@ async def run_bot(session: aiohttp.ClientSession, character_name: str, skill_nam
     # Craft the goods
     crafted_item_code = await get_crafted_item_code(session, craft_material=first_resource, craft_skill=skill_name)
     crafted_item_qty = await character_object.get_nb_craftable_items(crafted_item_code)
-    print(f'craftable items for {character_object.name}: {crafted_item_qty}')
+    print(f'{character_object.name} > craftable items: {crafted_item_qty}')
 
     if crafted_item_qty > 0:
       cooldown = await character_object.perform_crafting(crafted_item_code, crafted_item_qty)
@@ -438,7 +425,7 @@ async def run_bot(session: aiohttp.ClientSession, character_name: str, skill_nam
     await asyncio.sleep(cooldown)
     # Deposit the goods
     available_material_qty = await character_object.get_inventory_quantity(crafted_item_code)
-    print(f'available items {crafted_item_code} for {character_object.name}: {available_material_qty}')
+    print(f'{character_object.name} > available items {crafted_item_code}: {available_material_qty}')
     cooldown = await character_object.bank_deposit(crafted_item_code, available_material_qty)
     await asyncio.sleep(cooldown)
 
@@ -464,7 +451,10 @@ async def main():
 
     await asyncio.gather(
       run_bot(session, 'Kersh', 'mining', map_object),
-      run_bot(session, 'Capu', 'woodcutting', map_object)
+      run_bot(session, 'Capu', 'woodcutting', map_object),
+      run_bot(session, 'Crabex', 'mining', map_object),
+      run_bot(session, 'Brubu', 'woodcutting', map_object),
+      run_bot(session, 'JeaGa', 'fishing', map_object)
     )
 
 asyncio.run(main())
