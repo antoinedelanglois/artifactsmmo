@@ -35,6 +35,18 @@ async def get_headers(_token: str) -> dict:
         "Authorization": f"Bearer {_token}"
     }
 
+async def get_bank_items(session: aiohttp.ClientSession) -> dict:
+  url = f"{server}/my/bank/items/"
+  headers = await get_headers(token)
+
+  async with session.get(url, headers=headers) as response:
+    if response.status != 200:
+      r = handle_incorrect_status_code(response.status, f'GET BANK ITEMS')
+      return r
+    else:
+      data = await response.json()
+      return {item['code']: item['quantity'] for item in data["data"]}
+
 async def get_item_infos(session: aiohttp.ClientSession, _item_code: str) -> dict:
   """
   Retrieves one item details from the API.
@@ -141,9 +153,17 @@ scenarii = {
 
 class Character:
 
-  def __init__(self, name: str, session: aiohttp.ClientSession):
+  def __init__(self, session: aiohttp.ClientSession, name: str, gathering_skill_name: str, crafting_skill_name: str):
       self.name = name
       self.session = session
+      self.gathering_skill_name = gathering_skill_name
+      self.crafting_skill_name = crafting_skill_name
+
+  async def set_gathering_skill(self, gathering_skill_name: str):
+    self.gathering_skill_name = gathering_skill_name
+
+  async def set_crafting_skill(self, crafting_skill_name: str):
+    self.crafting_skill_name = crafting_skill_name
 
   async def get_infos(self) -> list:
     url = f"{server}/characters/{self.name}"
@@ -177,6 +197,18 @@ class Character:
         if qty > 0
     }
 
+  async def get_potentially_craftable_items(self, craft_skill: str) -> list[dict]:
+    skill_level = await self.get_skill_level(craft_skill)
+    infos = await self.get_infos()
+    potentially_craftable_items = await get_all_items(
+      session=self.session,
+      params={
+        'max_level': skill_level,
+        'craft_skill': craft_skill
+        }
+      )
+    return potentially_craftable_items
+
    #   "type": "resource",
    #   "subtype": "woodcutting",
 
@@ -187,7 +219,7 @@ class Character:
       if item_infos['code']:  # There are '' items in inventory...
         # print(f'DEBUG get_depositable_items > Check craft details for {item_infos}')
         craft_details = await get_craft_details(self.session, item_infos['code'])
-        if len(craft_details) > 0:
+        if len(craft_details) > 0 or item_infos['code'] in ['birch_wood', 'coal']:
           depositable_items[item_infos['code']] = item_infos['quantity']
     return depositable_items
 
@@ -195,12 +227,23 @@ class Character:
     infos = await self.get_infos()
     return infos[f'{skill_name}_level']
 
-  async def is_inventory_not_full(self) -> bool:
+  async def get_inventory_size(self) -> int:
     infos = await self.get_infos()
-    return  sum([
+    return sum([
         i_infos['quantity']
         for i_infos in infos['inventory']
-        ]) < infos['inventory_max_items']
+        ])
+
+  async def get_inventory_items(self) -> dict:
+    infos = await self.get_infos()
+    return {
+        i_infos['code']: i_infos['quantity']
+        for i_infos in infos['inventory']
+    }
+
+  async def is_inventory_not_full(self) -> bool:
+    infos = await self.get_infos()
+    return  self.get_inventory_size() < infos['inventory_max_items']
 
   async def get_current_location(self) -> tuple[int]:
     infos = await self.get_infos()
@@ -291,6 +334,25 @@ class Character:
         else:
             data = await response.json()
             print(f'{self.name} > {quantity} {item_code} deposited. Cooldown: {data["data"]["cooldown"]["total_seconds"]}')
+
+            # Return the cooldown in seconds
+            return data["data"]["cooldown"]["total_seconds"]
+
+  async def bank_withdraw(self, item_code: str, quantity: int) -> int:
+    url = f"{server}/my/{self.name}/action/bank/withdraw"
+    headers = await get_headers(token)
+    payload = {
+        "code": item_code,
+        "quantity": quantity
+    }
+
+    async with self.session.post(url, data=json.dumps(payload), headers=headers) as response:
+        if response.status != 200:
+            handle_incorrect_status_code(response.status, self.name)
+            return -1
+        else:
+            data = await response.json()
+            print(f'{self.name} > {quantity} {item_code} withdrawed. Cooldown: {data["data"]["cooldown"]["total_seconds"]}')
 
             # Return the cooldown in seconds
             return data["data"]["cooldown"]["total_seconds"]
@@ -398,78 +460,142 @@ class Map:
 
 # ** WOOD CUTTER / PLANK CRAFTER
 
-async def run_bot(session: aiohttp.ClientSession, character_name: str, skill_name: str, map_object: Map):
-
-  character_object = Character(character_name, session)
+async def run_bot(character_object: Character, map_object: Map):
 
   while True:
 
     # GATHER
-    # Get skill level
-    skill_level = await character_object.get_skill_level(skill_name)
-    print(f'{character_object.name} > level of {skill_name}: {skill_level}')
-    # Look where the character can go to best express his skill
-    location_details = await map_object.get_skill_location_details(level=skill_level, skill=skill_name)
-    resource_location_code = location_details['code']
 
-    print(f'{character_object.name} > location of {skill_name}: {resource_location_code}')
-    first_resource = location_details['drops'][0]['code']
-    print(f'{character_object.name} > resource: {first_resource}')
-    # Move to the (TODO: nearest) wood location
-    if await character_object.is_inventory_not_full():
-      nearest_resource_coords = await character_object.get_nearest_coords(
-          content_type='resource',
-          content_code=resource_location_code
-          )
-      cooldown = await character_object.move(*nearest_resource_coords)
-      await asyncio.sleep(cooldown)
-      # Gather wood
-      while await character_object.is_inventory_not_full():
-        cooldown = await character_object.perform_gathering()
-        await asyncio.sleep(cooldown)
+    # Get gathering skill level
+    skill_level = await character_object.get_skill_level(character_object.gathering_skill_name)
+    print(f'{character_object.name} > level of {character_object.gathering_skill_name}: {skill_level}')
 
-    # CRAFT
+    # Get crafting skill level
+    crafting_level = await character_object.get_skill_level(character_object.crafting_skill_name)
+    print(f'{character_object.name} > level of {character_object.crafting_skill_name}: {crafting_level}')
+    # What can they craft (thus what should they gather?)
 
-    # if all the necessary materials are available - else go pick them
-    # what can be build solely with the first resource?
+    # TODO If material is available in bank and secondary crafting skill set, let's craft some
+
+    # Get the craftable items depending on level
+    craftable_items = await character_object.get_potentially_craftable_items(character_object.gathering_skill_name)
+
+    if len(craftable_items) > 0:
+      sorted_craftable_items = sorted(craftable_items, key=lambda x: x['level'], reverse=True)
+      print(f'{character_object.name} > sorted items: {sorted_craftable_items}')
+      # Select the highest level item
+      highest_level_item = sorted_craftable_items[0]
+      print(f'{character_object.name} > highest level item: {highest_level_item}')
+
+      # Define gathering objectives accordingly (depending of available room in inventory)
+      # Can either collect it by itself or get it out of bank
+      # Loop on successive craftable items to select the most eligible
+      for craftable_item in sorted_craftable_items:
+        print(f'{character_object.name} > Check reachability of materials for craftable item: {craftable_item}')
+        # What are the materials?
+        craft_materials = craftable_item['craft']['items']
+        craft_skill = craftable_item['craft']['skill']
+        craft_level = craftable_item['craft']['level']
+        print(f'{character_object.name} > materials: {craft_materials} + skill {craft_skill} + level {craft_level}')
+        character_skill_level = await character_object.get_skill_level(craft_skill)
+        if character_skill_level >= craft_level:
+          # Get a strategy to gather/collect the right portions of materials
+          character_infos = await character_object.get_infos()
+          total_inventory_size = int(character_infos['inventory_max_items'])
+          total_nb_materials = sum([material['quantity'] for material in craft_materials])
+
+          # If inventory is not empty > go and deposit all of it
+          if await character_object.get_inventory_size() > 0:
+            # Go to bank and deposit all objects
+            # Move to the bank
+            bank_coords = await character_object.get_nearest_coords(
+              content_type='bank',
+              content_code='bank'
+              )
+            cooldown = await character_object.move(*bank_coords)
+            await asyncio.sleep(cooldown)
+
+            # Deposit all the items in the inventory
+            # TODO get a method for full deposit
+            inventory_items = await character_object.get_inventory_items()
+            for item_code, item_qty in inventory_items.items():
+              cooldown = await character_object.bank_deposit(item_code, item_qty)
+              await asyncio.sleep(cooldown)
+
+          for material in craft_materials:
+
+            # If character already got some
+            qty_in_bag = await character_object.get_inventory_quantity(material["code"])
+
+
+            qty_to_get = round(total_inventory_size * int(material['quantity']) / total_nb_materials) - qty_in_bag
+            print(f'{character_object.name} > let gather {qty_to_get} {material["code"]}')
+            # if not at bank in the correct qty, go and gather it
+            # Check the bank
+            bank_items = await get_bank_items(character_object.session)
+            # print(f'bank_items > {bank_items}')
+            if bank_items.get(material['code'], 0) >= qty_to_get:
+              # Go and get the materials at the bank
+
+              # Move to the bank
+              bank_coords = await character_object.get_nearest_coords(
+                content_type='bank',
+                content_code='bank'
+                )
+              cooldown = await character_object.move(*bank_coords)
+              await asyncio.sleep(cooldown)
+
+              # Get the materials
+              cooldown = await character_object.bank_withdraw(material['code'], qty_to_get)
+              await asyncio.sleep(cooldown)
+
+            else:
+              # Go and gather the material
+
+              # TODO get the currently available materials in bank, while on site?
+
+              # TODO get the location specific to the target material
+              # Look where the character can go to best express his skill
+              location_details = await map_object.get_skill_location_details(level=skill_level, skill=character_object.gathering_skill_name)
+              resource_location_code = location_details['code']
+              print(f'{character_object.name} > location of {character_object.gathering_skill_name}: {resource_location_code}')
+
+              # Go to the resource location
+              nearest_resource_coords = await character_object.get_nearest_coords(
+                  content_type='resource',
+                  content_code=resource_location_code
+                  )
+              cooldown = await character_object.move(*nearest_resource_coords)
+              await asyncio.sleep(cooldown)
+
+              # Gather
+              while await character_object.get_inventory_quantity(material['code']) < qty_to_get:
+                cooldown = await character_object.perform_gathering()
+                await asyncio.sleep(cooldown)
+
+          item_to_craft = craftable_item['code']
+          print(f'{character_object.name} > item to craft {item_to_craft}')
+          break
+
+    # TRANSFORM
+
+    nb_items_to_craft = await character_object.get_nb_craftable_items(item_to_craft)
+
 
     # Move to the crafting location
     nearest_workshop_coords = await character_object.get_nearest_coords(
       content_type='workshop',
-      content_code='cooking' if skill_name == 'fishing' else skill_name
+      content_code='cooking' if character_object.gathering_skill_name == 'fishing' else character_object.gathering_skill_name
       )
-    print(f'{character_object.name} > location of {skill_name} workshop: {nearest_workshop_coords}')
+    print(f'{character_object.name} > location of {character_object.gathering_skill_name} workshop: {nearest_workshop_coords}')
     cooldown = await character_object.move(*nearest_workshop_coords)
     await asyncio.sleep(cooldown)
 
-    ## Once at the workshop, what can be crafted?
-    # Check the inventory for cratftable items (can still have items from last level)
-    craftable_items = await character_object.get_craftable_items(skill_name)
-    print(f'{character_object.name} > craftable items: {craftable_items}')
-    crafted_items = {}
-    for craftable_item_code, craftable_item_qty in craftable_items.items():
-      print(f'{character_object.name} > craftable {craftable_item_code}: {craftable_item_qty}')
-      if craftable_item_qty > 0:
-        cooldown = await character_object.perform_crafting(craftable_item_code, craftable_item_qty)
-        crafted_items[craftable_item_code] = craftable_item_qty
-        await asyncio.sleep(cooldown)
-
-    # Move to the bank
-    bank_coords = await character_object.get_nearest_coords(
-      content_type='bank',
-      content_code='bank'
-      )
-    cooldown = await character_object.move(*bank_coords)
+    cooldown = await character_object.perform_crafting(item_to_craft, nb_items_to_craft)
     await asyncio.sleep(cooldown)
-    # Deposit the crafted goods (to identify in the inventory)
-    # TODO update with possible additional qty in inventory?
 
-    depositable_items = await character_object.get_depositable_items()
 
-    for item_code, item_qty in depositable_items.items():
-      print(f'{character_object.name} > available items {item_code}: {item_qty}')
-      cooldown = await character_object.bank_deposit(item_code, item_qty)
-      await asyncio.sleep(cooldown)
+    # TODO recycle
 
 # personae
 # ** WOOD CUTTER / PLANK CRAFTER
@@ -480,10 +606,6 @@ async def run_bot(session: aiohttp.ClientSession, character_name: str, skill_nam
 # + GEAR CRAFTER
 # + JEWEL CRAFTER
 
-###
-###  Yes asyncio with aiohttp
-###. Then just run all your characters in a taskgroup
-
   # TODO > recycle
 
 async def main():
@@ -491,12 +613,15 @@ async def main():
 
     map_object = Map(session)
 
-    await asyncio.gather(
-      run_bot(session, 'Kersh', 'mining', map_object),
-      run_bot(session, 'Capu', 'woodcutting', map_object),
-      run_bot(session, 'Crabex', 'woodcutting', map_object),
-      run_bot(session, 'Brubu', 'mining', map_object),
-      run_bot(session, 'JeaGa', 'fishing', map_object)
-    )
+    # Create characters
+    characters = [
+        Character(session, 'Kersh', 'mining', 'weaponcrafting'),
+        Character(session, 'Capu', 'woodcutting', 'gearcrafting'),
+        Character(session, 'Crabex', 'woodcutting', 'jewelrycrafting'),
+        Character(session, 'Brubu', 'mining', 'mining'),
+        Character(session, 'JeaGa', 'fishing', 'cooking'),
+    ]
+
+    await asyncio.gather(*[run_bot(character, map_object) for character in characters])
 
 await main()
