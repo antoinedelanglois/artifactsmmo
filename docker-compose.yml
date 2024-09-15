@@ -1,0 +1,10 @@
+version: '3'
+services:
+  artifactsmmo_bot:
+    build: .
+    container_name: artifactsmmo_bot
+    restart: unless-stopped
+    volumes:
+      - ./:/app
+    environment:
+      - ARTIFACTSMMO_TOKEN=${ARTIFACTSMMO_TOKEN}
