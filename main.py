@@ -1,7 +1,6 @@
 import aiohttp
 import asyncio
 import logging
-# import nest_asyncio
 from aiohttp.client_exceptions import ClientConnectorError
 from dataclasses import dataclass, field
 import re
@@ -13,8 +12,6 @@ load_dotenv()
 TOKEN = os.getenv('ARTIFACTSMMO_TOKEN')
 if not TOKEN:
     raise ValueError("Le TOKEN n'est pas défini. Veuillez le définir dans les variables d'environnement.")
-
-# nest_asyncio.apply()
 
 logging.basicConfig(
     force=True,
@@ -573,11 +570,11 @@ class Character:
     def __post_init__(self):
         # Custom logger setup
         self.logger = logging.getLogger(self.name)
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(f'%(asctime)s - {self.name} - [%(levelname)s] %(message)s')
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        self.logger.propagate = False
+        # handler = logging.StreamHandler()
+        # formatter = logging.Formatter(f'%(asctime)s - {self.name} - [%(levelname)s] %(message)s')
+        # handler.setFormatter(formatter)
+        # self.logger.addHandler(handler)
+        # self.logger.propagate = False
 
         self.excluded_equipments = list(self.all_equipments['excluded'].keys())  # FIXME Shared amongst all characters
         self.equipments = {k: v for c, e in self.all_equipments.items() for k, v in e.items() if c != 'excluded'}
@@ -615,10 +612,10 @@ class Character:
             {item["code"]: item for item in self.all_items['resources']}[dropped_material['code']]
             for gatherable_resources_spot in gatherable_resources_spots
             for dropped_material in gatherable_resources_spot['drops']
-            if (not await is_protected_material(self.session, dropped_material['code'])) and dropped_material['rate'] <= 25   # Exclude protected material
+            if (not await is_protected_material(self.session, dropped_material['code'])) and dropped_material['rate'] <= 100   # Exclude protected material
             # TODO exclude materials with a low rate of drop
         ]
-        self.logger.debug(f"Gatherable resources for {self.name}: {[r['code'] for r in self.gatherable_resources]}")
+        self.logger.info(f"Gatherable resources for {self.name}: {[r['code'] for r in self.gatherable_resources]}")
 
     async def set_craftable_items(self):
         """
@@ -943,7 +940,7 @@ class Character:
         )
         nearest_resource = {'x': 4, 'y': 1}     # Default to bank
         if len(resource_locations) == 0:
-            self.logger.info(f'No resource {content_code} on this map')
+            self.logger.warning(f'No resource {content_code} on this map')
             return nearest_resource['x'], nearest_resource['y']
 
         if len(resource_locations) == 1:
@@ -978,7 +975,7 @@ class Character:
                 material_inventory_qty = await self.get_inventory_quantity(material_code)
                 nb_craftable_items = min(material_inventory_qty//qty, nb_craftable_items)
 
-        self.logger.info(f' nb of craftable items {"from inventory" if from_inventory else ""} for {_item_code} is {nb_craftable_items}')
+        self.logger.debug(f' nb of craftable items {"from inventory" if from_inventory else ""} for {_item_code} is {nb_craftable_items}')
 
         return nb_craftable_items
 
@@ -997,7 +994,7 @@ class Character:
         data = await make_request(session=self.session, method='POST', url=url, payload=payload)
         if data:
             _cooldown = data["data"]["cooldown"]["total_seconds"]
-            self.logger.info(f'{quantity} {item_code} deposited. Cooldown: {_cooldown} seconds')
+            self.logger.debug(f'{quantity} {item_code} deposited. Cooldown: {_cooldown} seconds')
             return _cooldown
         else:
             self.logger.error(f'Failed to deposit {quantity} {item_code}')
@@ -1012,7 +1009,7 @@ class Character:
         data = await make_request(session=self.session, method='POST', url=url, payload=payload)
         if data:
             _cooldown = data["data"]["cooldown"]["total_seconds"]
-            self.logger.info(f'{quantity} {item_code} withdrawn. Cooldown: {_cooldown} seconds')
+            self.logger.debug(f'{quantity} {item_code} withdrawn. Cooldown: {_cooldown} seconds')
             return _cooldown
         else:
             self.logger.error(f'Failed to withdraw {quantity} {item_code}')
@@ -1039,7 +1036,6 @@ class Character:
         data = await make_request(session=self.session, method='POST', url=url)
         if data:
             _cooldown = data["data"]["cooldown"]["total_seconds"]
-            # self.logger.info(f'won. Cooldown: {_cooldown} seconds')
             return _cooldown
         else:
             self.logger.error(f'failed to perform fighting action.')
@@ -1050,7 +1046,6 @@ class Character:
         data = await make_request(session=self.session, method='POST', url=url)
         if data:
             _cooldown = data["data"]["cooldown"]["total_seconds"]
-            # self.logger.info(f'Resource gathered. Cooldown: {_cooldown} seconds')
             return _cooldown
         else:
             self.logger.error(f'failed to gather resources.')
@@ -1100,20 +1095,20 @@ class Character:
         item_infos = await get_item_infos(self.session, item_code)
         skill_name = item_infos['craft']['skill']
         coords = await self.get_nearest_coords(content_type='workshop', content_code=skill_name)
-        self.logger.info(f'{self.name} > moving to workshop at {coords}')
+        self.logger.debug(f'{self.name} > moving to workshop at {coords}')
         cooldown_ = await self.move(*coords)
         await asyncio.sleep(cooldown_)
 
     async def move_to_monster(self, monster_code: str = ""):
         monster_code = await self.get_monster_target() if monster_code == "" else monster_code
         coords = await self.get_nearest_coords(content_type='monster', content_code=monster_code)
-        self.logger.info(f'{self.name} > moving to monster {monster_code} at {coords}')
+        self.logger.debug(f'{self.name} > moving to monster {monster_code} at {coords}')
         cooldown_ = await self.move(*coords)
         await asyncio.sleep(cooldown_)
 
     async def move_to_task_master(self):
         coords = await self.get_nearest_coords(content_type='tasks_master', content_code='monsters')
-        self.logger.info(f'{self.name} > moving to tasks master at {coords}')
+        self.logger.debug(f'{self.name} > moving to tasks master at {coords}')
         cooldown_ = await self.move(*coords)
         await asyncio.sleep(cooldown_)
 
@@ -1121,7 +1116,7 @@ class Character:
         if _item_code is not None:
             monster_location = await get_dropping_monster_locations(self.session, _item_code)
             monster_code = monster_location['code']
-            self.logger.info(f' item {_item_code} is dropped by {monster_code}')
+            self.logger.debug(f' item {_item_code} is dropped by {monster_code}')
             self.fight_target = monster_code
 
     async def equip_for_fight(self):
@@ -1136,7 +1131,7 @@ class Character:
     async def go_and_equip(self, _equipment_slot: str, _equipment_code: str):
         current_equipment_code = await self.get_equipment_code(_equipment_slot)
         if current_equipment_code != _equipment_code:
-            self.logger.info(f' will change equipment for {_equipment_slot} from {current_equipment_code} to {_equipment_code}')
+            self.logger.debug(f' will change equipment for {_equipment_slot} from {current_equipment_code} to {_equipment_code}')
             await self.move_to_bank()
             await self.withdraw_items_from_bank({_equipment_code: 1})
             if current_equipment_code != "":
@@ -1160,7 +1155,7 @@ class Character:
     async def gather_and_collect(self, _craft_details: dict[str, dict[str, int]]):
         fight_details = _craft_details['fight']
         if sum([qty for _, qty in fight_details.items()]) > 0:
-            self.logger.info(f'going to fight: {fight_details} ...')
+            self.logger.debug(f'going to fight: {fight_details} ...')
             for item_code, qty in fight_details.items():
                 await self.prepare_fighting_for_item(item_code)
                 await self.equip_for_fight()
@@ -1347,7 +1342,7 @@ class Character:
             new_consumable = new_consumables[i]
 
             if new_consumable is None:
-                self.logger.info(f"No valid consumable available for {slot}. Skipping.")
+                self.logger.debug(f"No valid consumable available for {slot}. Skipping.")
                 continue
 
             # Get current consumable details for the slot
@@ -1368,7 +1363,7 @@ class Character:
                         await self.withdraw_items_from_bank({new_code: withdraw_qty})
                         await self.equip(new_code, slot, withdraw_qty)
                 else:
-                    self.logger.info(f"{slot} already equipped with {new_code} and fully stocked.")
+                    self.logger.debug(f"{slot} already equipped with {new_code} and fully stocked.")
             else:
                 # Equip the new consumable if it's different from the current one
                 if current_code:
@@ -1415,7 +1410,7 @@ class Character:
         data = await make_request(session=self.session, method='POST', url=url, payload=payload)
         if data:
             _cooldown = data["data"]["cooldown"]["total_seconds"]
-            self.logger.info(f'{qte} {slot_code} unequipped. Cooldown: {_cooldown} seconds')
+            self.logger.debug(f'{qte} {slot_code} unequipped. Cooldown: {_cooldown} seconds')
             return _cooldown
         else:
             self.logger.error(f'Failed to unequip {qte} {slot_code}')
@@ -1431,7 +1426,7 @@ class Character:
         data = await make_request(session=self.session, method='POST', url=url, payload=payload)
         if data:
             _cooldown = data["data"]["cooldown"]["total_seconds"]
-            self.logger.info(f'{qte} {item_code} equipped at slot {slot_code}. Cooldown: {_cooldown} seconds')
+            self.logger.debug(f'{qte} {item_code} equipped at slot {slot_code}. Cooldown: {_cooldown} seconds')
             return _cooldown
         else:
             self.logger.error(f'Failed to equip {qte} {item_code} at slot {slot_code}')
@@ -1767,6 +1762,7 @@ class Character:
         ]
 
         if len(craftable_new_equipments) > 0:
+            self.logger.warning(f' New equipments to craft: {craftable_new_equipments}')
             equipment_code = craftable_new_equipments[0]['code']
             equipment_qty = await get_all_map_item_qty(self.session, equipment_code)
             equipment_min_stock = await get_min_stock_qty(self.session, equipment_code)
@@ -1913,7 +1909,7 @@ async def main():
         characters_ = [
             Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Kersh', max_fight_level=20, skills=['weaponcrafting', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining'
             Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Capu', max_fight_level=20, skills=['gearcrafting', 'mining', 'woodcutting']),  #
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Brubu', max_fight_level=20, skills=['fishing']),  # , 'mining', 'woodcutting'
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Brubu', max_fight_level=20, skills=['fishing', 'mining', 'woodcutting']),  # , 'mining', 'woodcutting'
             Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Crabex', max_fight_level=20, skills=['jewelrycrafting', 'mining', 'woodcutting']),  # 'jewelrycrafting', 'woodcutting'
             Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='JeaGa', max_fight_level=20, skills=['mining', 'woodcutting']),  # 'cooking', 'fishing'
         ]
