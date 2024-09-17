@@ -1907,11 +1907,11 @@ async def main():
         # LOCAL_BANK = await get_bank_items(session)
 
         characters_ = [
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Kersh', max_fight_level=20, skills=['weaponcrafting', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining'
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Capu', max_fight_level=20, skills=['gearcrafting', 'mining', 'woodcutting']),  #
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Brubu', max_fight_level=20, skills=['fishing', 'mining', 'woodcutting']),  # , 'mining', 'woodcutting'
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Crabex', max_fight_level=20, skills=['jewelrycrafting', 'mining', 'woodcutting']),  # 'jewelrycrafting', 'woodcutting'
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='JeaGa', max_fight_level=20, skills=['mining', 'woodcutting']),  # 'cooking', 'fishing'
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Kersh', max_fight_level=24, skills=['weaponcrafting', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining'
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Capu', max_fight_level=24, skills=['gearcrafting', 'mining', 'woodcutting']),  #
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Brubu', max_fight_level=24, skills=['fishing', 'mining', 'woodcutting']),  # , 'mining', 'woodcutting'
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Crabex', max_fight_level=24, skills=['jewelrycrafting', 'mining', 'woodcutting']),  # 'jewelrycrafting', 'woodcutting'
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='JeaGa', max_fight_level=24, skills=['mining', 'woodcutting']),  # 'cooking', 'fishing'
         ]
 
         # Initialize all characters asynchronously
