@@ -1141,6 +1141,8 @@ class Character:
 
     async def equip_for_gathering(self, _item_code: str):
         item_infos = await get_item_infos(self.session, _item_code)
+        if item_infos.get("subtype", None) is None:
+            return
 
         # TODO check available equipements with "effects" > "name" == "gathering_skill"
 
@@ -1889,28 +1891,17 @@ async def main():
         ]
         logging.info(f'Excluded consumables: {[c["code"] for c in excluded_items["consumables"]]}')
 
-        # excluded_items['items'] = [
-        #     'copper_ring', 'copper_dagger', 'sticky_sword', 'copper_armor', 'copper_helmet', 'copper_boots',
-        #     'copper_legs_armor', 'wooden_shield', 'feather_coat', 'life_amulet', 'leather_boots', 'leather_armor',
-        #     'leather_hat', 'iron_dagger'
-        # ]
-        # logging.info(f'Excluded items: {[i for i in excluded_items["items"]]}')
-
         obsolete_equipments = await get_obsolete_equipments(session)
-        # logging.info("Obsolete Equipments:")
-        # for equipment in obsolete_equipments:
-        #     logging.info(f"- {equipment['code']} (Type: {equipment['type']}, Level: {equipment['level']})")
-
         all_equipments = await get_crafted_items(session)
         all_equipments['excluded'] = {equipment['code']: 'excluded' for equipment in obsolete_equipments}
 
         # LOCAL_BANK = await get_bank_items(session)
 
         characters_ = [
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Kersh', max_fight_level=24, skills=['weaponcrafting', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining'
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Capu', max_fight_level=24, skills=['gearcrafting', 'mining', 'woodcutting']),  #
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Brubu', max_fight_level=24, skills=['fishing', 'mining', 'woodcutting']),  # , 'mining', 'woodcutting'
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Crabex', max_fight_level=24, skills=['jewelrycrafting', 'mining', 'woodcutting']),  # 'jewelrycrafting', 'woodcutting'
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Kersh', max_fight_level=24, skills=['mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Capu', max_fight_level=24, skills=['woodcutting', 'mining']),  # 'gearcrafting',
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Brubu', max_fight_level=24, skills=['mining', 'woodcutting']),  # , 'fishing', 'mining', 'woodcutting'
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Crabex', max_fight_level=24, skills=['woodcutting', 'mining']),  # 'jewelrycrafting', 'jewelrycrafting', 'woodcutting'
             Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='JeaGa', max_fight_level=24, skills=['mining', 'woodcutting']),  # 'cooking', 'fishing'
         ]
 
