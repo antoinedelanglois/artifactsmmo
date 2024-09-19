@@ -777,7 +777,7 @@ class Character:
                 _items_details = await self.get_inventory_items()
                 gold_amount = await self.get_gold_amount()
                 if gold_amount > 0:
-                    _items_details['gold'] = gold_amount
+                    _items_details['money'] = gold_amount
 
             self.logger.debug(f'depositing at bank: {_items_details} ...')
             for item_code, item_qty in _items_details.items():
@@ -981,7 +981,7 @@ class Character:
 
     async def bank_deposit(self, item_code: str, quantity: int) -> int:
         url = f"{SERVER}/my/{self.name}/action/bank/deposit"
-        if item_code == 'gold':
+        if item_code == 'money':
             url += '/gold'
             payload = {
                 "quantity": quantity
