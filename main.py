@@ -822,7 +822,15 @@ class Character:
         got_enough_consumables = await self.got_enough_consumables(-1)
         inventory_not_full = await self.is_inventory_not_full()
         is_task_complete = await self.is_task_completed()
-        return got_enough_consumables and inventory_not_full and not is_task_complete
+        is_not_at_spawn_place = not await self.is_at_spawn_place()
+        return got_enough_consumables and inventory_not_full and not is_task_complete and is_not_at_spawn_place
+
+    async def is_at_spawn_place(self) -> bool:
+        current_location = await self.get_current_location()
+        if current_location == (0, 0):
+            self.logger.debug(f'is already at spawn place - likely killed by a monster')
+            return True
+        return False
 
     async def go_and_fight_to_collect(self, material_code: str, quantity_to_get: int):
         # Identify the monster and go there IF fightable
