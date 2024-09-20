@@ -460,7 +460,7 @@ async def get_monster_vulnerabilities(monster_infos: dict) -> dict[str, int]:
     resistances = sorted([
         res
         for res in ["res_fire", "res_earth", "res_water", "res_air"]
-        if monster_infos[res] < 0
+        if monster_infos.get(res, 0) < 0
     ], key=lambda x: monster_infos[x], reverse=False
     )
 
