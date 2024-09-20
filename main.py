@@ -556,7 +556,6 @@ class Character:
     excluded_items: dict[str, list[dict]]
     name: str
     skills: list[str]
-    fight_target: str = ""
     max_fight_level: int = 0
     stock_qty_objective: int = 500
     task: Task = field(default_factory=Task)
@@ -1100,7 +1099,7 @@ class Character:
         await asyncio.sleep(cooldown_)
 
     async def move_to_monster(self, monster_code: str = ""):
-        monster_code = await self.get_monster_target() if monster_code == "" else monster_code
+        monster_code = self.task.code if monster_code == "" else monster_code
         coords = await self.get_nearest_coords(content_type='monster', content_code=monster_code)
         self.logger.debug(f'{self.name} > moving to monster {monster_code} at {coords}')
         cooldown_ = await self.move(*coords)
@@ -1117,12 +1116,6 @@ class Character:
             monster_location = await get_dropping_monster_locations(self.session, _item_code)
             monster_code = monster_location['code']
             self.logger.debug(f' item {_item_code} is dropped by {monster_code}')
-            self.fight_target = monster_code
-
-    async def equip_for_fight(self):
-        # TODO get the best weapons and equipment for specific fight target
-        await self.auto_equip()
-        return
 
     async def get_equipment_code(self, _equipment_slot: str):
         infos = await self.get_infos()
@@ -1258,12 +1251,12 @@ class Character:
         character_level = await self.get_level()
         return character_level >= equipment_infos['level']
 
-    async def auto_equip(self):
+    async def equip_for_fight(self):
 
         # Identify vulnerability
-        monster_infos = await get_monster_infos(self.session, await self.get_monster_target())
+        monster_infos = await get_monster_infos(self.session, self.task.code)
         vulnerability = await get_monster_vulnerability(monster_infos=monster_infos)
-        self.logger.info(f' monster {self.fight_target} vulnerability is {vulnerability}')
+        self.logger.info(f' monster {self.task.code} vulnerability is {vulnerability}')
 
         # Manage equipment
         for equipment_slot in EQUIPMENTS_SLOTS:
@@ -1469,9 +1462,6 @@ class Character:
 
         character_infos = await self.get_infos()
         return character_infos.get("task_progress", "A") == character_infos.get("task_total", "B")
-
-    async def get_monster_target(self):
-        return self.fight_target
 
     async def get_unnecessary_equipments(self) -> dict[str, int]:
         recycle_details = {}
@@ -1900,7 +1890,7 @@ async def main():
         characters_ = [
             Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Kersh', max_fight_level=24, skills=['mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
             Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Capu', max_fight_level=24, skills=['woodcutting', 'mining']),  # 'gearcrafting',
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Brubu', max_fight_level=24, skills=['mining', 'woodcutting']),  # , 'fishing', 'mining', 'woodcutting'
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Brubu', max_fight_level=30, skills=['mining', 'woodcutting']),  # , 'fishing', 'mining', 'woodcutting'
             Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Crabex', max_fight_level=24, skills=['woodcutting', 'mining']),  # 'jewelrycrafting', 'jewelrycrafting', 'woodcutting'
             Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='JeaGa', max_fight_level=24, skills=['mining', 'woodcutting']),  # 'cooking', 'fishing'
         ]
