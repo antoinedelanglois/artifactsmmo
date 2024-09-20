@@ -455,7 +455,7 @@ async def get_dropping_monster_locations(session: aiohttp.ClientSession, _materi
     }
 
 
-async def get_monster_vulnerabilities(monster_infos: dict) -> list[str]:
+async def get_monster_vulnerabilities(monster_infos: dict) -> dict[str, int]:
 
     resistances = sorted([
         res
@@ -464,21 +464,10 @@ async def get_monster_vulnerabilities(monster_infos: dict) -> list[str]:
     ], key=lambda x: monster_infos[x], reverse=False
     )
 
-    return [resistance.replace("res_", "") for resistance in resistances]
+    return {resistance.replace("res_", ""): -1 * monster_infos[resistance] for resistance in resistances}
 
 
-async def get_monster_vulnerability(monster_infos: dict) -> str:
-
-    resistances = sorted([
-        res
-        for res in ["res_fire", "res_earth", "res_water", "res_air"]
-    ], key=lambda x: monster_infos[x], reverse=False
-    )
-
-    return resistances[0].replace("res_", "")
-
-
-async def select_best_equipment(equipment1_infos: dict, sorted_valid_equipments: list[dict], vulnerability: str) -> dict:
+async def select_best_equipment(equipment1_infos: dict, sorted_valid_equipments: list[dict], vulnerabilities: dict[str, int]) -> dict:
     """
     Selects the best equipment based on monster vulnerability and equipment effects.
 
@@ -492,39 +481,55 @@ async def select_best_equipment(equipment1_infos: dict, sorted_valid_equipments:
     if not equipment1_infos:
         return sorted_valid_equipments[0]
 
-    def calculate_effect_score(_effects: dict, _vulnerability: str) -> int:
+    def calculate_effect_score(_effects: dict, _vulnerabilities: dict[str, int]) -> int:
         """
         Calculate the equipment score based on the effects, giving more weight to the monster's vulnerability.
         """
         score = 0
+        total_attack = 0  # Used when vulnerabilities are equal to prioritize damage
+        all_vulnerabilities_equal = len(_vulnerabilities) == 4
         for effect_name, effect_value in _effects.items():
+
             if effect_name.startswith("attack_"):
                 element = effect_name.replace("attack_", "")
-                if element == _vulnerability:
-                    score += effect_value * 4  # Double weight for matching vulnerability
+                total_attack += effect_value
+                if all_vulnerabilities_equal:
+                    score += effect_value * 4  # High weight for attack effects
                 else:
-                    score += effect_value  # Lesser weight for other elements
+                    if element in _vulnerabilities:
+                        percentage = _vulnerabilities[element]
+                        score += effect_value * 4 * (percentage / 100)  # Weight by vulnerability percentage
+                    else:
+                        score += effect_value  # Lesser weight for non-vulnerable elements
             elif effect_name.startswith("dmg_"):
                 element = effect_name.replace("dmg_", "")
-                if element == _vulnerability:
-                    score += effect_value * 3  # Slight weight for resistance-related effects
+                if all_vulnerabilities_equal:
+                    score += effect_value * 3
+                else:
+                    if element in _vulnerabilities:
+                        percentage = _vulnerabilities[element]
+                        score += effect_value * 3 * (percentage / 100)
             elif effect_name == "hp":
-                score += effect_value * 0.25  # Lower weight for HP
+                score += effect_value * 0.25
             elif effect_name == "defense":
-                score += effect_value * 0.5  # Lower weight for defense
+                score += effect_value * 0.5
             else:
                 score += effect_value  # Default score for other effects
+
+        # If vulnerabilities are equal, prioritize equipment with the highest total attack
+        if all_vulnerabilities_equal:
+            score += total_attack * 2  # Additional weight for total attack
         return score
 
     best_equipment = equipment1_infos
     best_score = calculate_effect_score(
         {effect['name']: effect['value'] for effect in equipment1_infos.get('effects', [])},
-        vulnerability
+        vulnerabilities
     )
 
     for equipment2_infos in sorted_valid_equipments:
         equipment2_effects = {effect['name']: effect['value'] for effect in equipment2_infos.get('effects', [])}
-        equipment2_score = calculate_effect_score(equipment2_effects, vulnerability)
+        equipment2_score = calculate_effect_score(equipment2_effects, vulnerabilities)
 
         # Compare scores and select the best
         if equipment2_score > best_score:
@@ -1263,12 +1268,12 @@ class Character:
 
         # Identify vulnerability
         monster_infos = await get_monster_infos(self.session, self.task.code)
-        vulnerability = await get_monster_vulnerability(monster_infos=monster_infos)
-        self.logger.info(f' monster {self.task.code} vulnerability is {vulnerability}')
+        vulnerabilities = await get_monster_vulnerabilities(monster_infos=monster_infos)
+        self.logger.info(f' monster {self.task.code} vulnerabilities are {vulnerabilities}')
 
         # Manage equipment
         for equipment_slot in EQUIPMENTS_SLOTS:
-            await self.equip_best_equipment(equipment_slot, vulnerability)
+            await self.equip_best_equipment(equipment_slot, vulnerabilities)
 
         # Manage consumables
         await self.equip_best_consumables()
@@ -1385,7 +1390,7 @@ class Character:
         self.logger.debug(f' Currently equipped consumables: {currently_equipped_consumables}')
         return [self.equipments[c] if c else None for c in currently_equipped_consumables]
 
-    async def equip_best_equipment(self, _equipment_slot: str, vulnerability: str):
+    async def equip_best_equipment(self, _equipment_slot: str, vulnerabilities: dict[str, int]):
         available_equipments = await self.get_bank_equipments_for_slot(_equipment_slot)
         self.logger.debug(f'available equipment at bank {[e["code"] for e in available_equipments]}')
         sorted_valid_equipments = sorted([
@@ -1400,7 +1405,7 @@ class Character:
         if len(sorted_valid_equipments) == 0:
             return
         current_equipment_infos = self.equipments.get(current_equipment_code, {})
-        new_equipment_details = await select_best_equipment(current_equipment_infos, sorted_valid_equipments, vulnerability)
+        new_equipment_details = await select_best_equipment(current_equipment_infos, sorted_valid_equipments, vulnerabilities)
         self.logger.debug(f' has been assigned {new_equipment_details.get("code", "")} for slot {_equipment_slot} instead of {current_equipment_infos.get("code", "")}')
         await self.go_and_equip(_equipment_slot, new_equipment_details.get('code', ""))
 
@@ -1693,13 +1698,13 @@ class Character:
         if self.task.type == 'monsters':
             # Identify vulnerability
             monster_infos = await get_monster_infos(self.session, self.task.code)
-            vulnerability = await get_monster_vulnerability(monster_infos=monster_infos)
-            self.logger.info(f' monster {self.task.code} vulnerability is {vulnerability}')
+            vulnerabilities = await get_monster_vulnerabilities(monster_infos=monster_infos)
+            self.logger.info(f' monster {self.task.code} vulnerability is {vulnerabilities}')
 
             # Manage equipment
             for equipment_slot in ['weapon', 'shield', 'helmet', 'body_armor', 'leg_armor', 'boots', 'ring1', 'ring2',
                                    'amulet', 'artifact1', 'artifact2', 'artifact3']:
-                await self.equip_best_equipment(equipment_slot, vulnerability)
+                await self.equip_best_equipment(equipment_slot, vulnerabilities)
 
             # Manage consumables
             await self.equip_best_consumables()
@@ -1896,10 +1901,10 @@ async def main():
         # LOCAL_BANK = await get_bank_items(session)
 
         characters_ = [
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Kersh', max_fight_level=24, skills=['mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Capu', max_fight_level=24, skills=['woodcutting', 'mining']),  # 'gearcrafting',
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Brubu', max_fight_level=30, skills=['mining', 'woodcutting']),  # , 'fishing', 'mining', 'woodcutting'
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Crabex', max_fight_level=24, skills=['woodcutting', 'mining']),  # 'jewelrycrafting', 'jewelrycrafting', 'woodcutting'
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Kersh', max_fight_level=24, skills=['weaponcrafting', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Capu', max_fight_level=28, skills=['gearcrafting','woodcutting', 'mining']),  # 'gearcrafting',
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Brubu', max_fight_level=28, skills=['woodcutting', 'mining']),  # , 'fishing', 'mining', 'woodcutting'
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Crabex', max_fight_level=24, skills=['jewelrycrafting', 'woodcutting', 'mining']),  # 'jewelrycrafting', 'woodcutting'
             Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='JeaGa', max_fight_level=24, skills=['mining', 'woodcutting']),  # 'cooking', 'fishing'
         ]
 
