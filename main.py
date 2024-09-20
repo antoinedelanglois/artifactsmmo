@@ -1643,55 +1643,23 @@ class Character:
 
             # Checking if all is available in inventory
             if all([(await self.get_inventory_qty()).get(material_code, 0) >= material_qty for material_code, material_qty in craft_details.items()]):
-                # go and craft
-                await self.move_to_workshop(self.task.code)
-                cooldown_ = await self.perform_crafting(self.task.code, nb_items_to_craft)
-                await asyncio.sleep(cooldown_)
+                pass
             # Checking if all is available in bank
             elif all([await get_bank_item_qty(self.session, material_code) >= material_qty for material_code, material_qty in craft_details.items()]):
                 await self.deposit_items_at_bank()
                 await self.withdraw_items_from_bank(craft_details)
-                # go and craft
-
-                # Taking withdraw fails into account
-                nb_items_to_craft = await self.get_nb_craftable_items(self.task.code, from_inventory=True)
-
-                if nb_items_to_craft > 0:
-                    await self.move_to_workshop(self.task.code)
-                    cooldown_ = await self.perform_crafting(self.task.code, nb_items_to_craft)
-                    await asyncio.sleep(cooldown_)
             # Go and get it
             else:
-                for material_code, material_qty in craft_details.items():
+                task_details = await self.prepare_for_task()
+                await self.gather_and_collect(task_details)
 
-                    task_details = await self.prepare_for_task()
-                    await self.gather_and_collect(task_details)
+            # Taking withdraw fails into account
+            nb_items_to_craft = await self.get_nb_craftable_items(self.task.code, from_inventory=True)
 
-                    #
-                    # if await get_bank_item_qty(self.session, material_code) < material_qty:
-                    #     # reset task to get the material
-                    #     material = await get_item_infos(self.session, material_code)
-                    #     task_type = await self.get_task_type(material)
-                    #
-                    #     if task_type == 'monsters':
-                    #         target = await get_dropping_monster_locations(self.session, material_code)
-                    #     else:
-                    #         target = material
-                    #
-                    #     max_inventory_size = await self.get_inventory_max_size()
-                    #     target_qty = min(material_qty, max_inventory_size)
-                    #     self.logger.info(f" Max inventory: {max_inventory_size} VS material qty {material_qty} -> {target_qty}")
-                    #
-                    #     self.task = Task(
-                    #         code=target['code'],
-                    #         type=task_type,
-                    #         total=target_qty,
-                    #         details=target
-                    #     )
-                    #     self.logger.info(f' Details of new task {self.task}')
-                    #     await self.execute_task()
-                        # FIXME does the task includes depositing to bank afterwards?
-                        # return  # get back to the loop beginning
+            if nb_items_to_craft > 0:
+                await self.move_to_workshop(self.task.code)
+                cooldown_ = await self.perform_crafting(self.task.code, nb_items_to_craft)
+                await asyncio.sleep(cooldown_)
 
     async def equip_for_task(self):
 
