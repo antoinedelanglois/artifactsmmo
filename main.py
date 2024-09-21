@@ -472,7 +472,7 @@ async def get_monster_vulnerabilities(monster_infos: dict) -> dict[str, int]:
     resistances = sorted([
         res
         for res in ["res_fire", "res_earth", "res_water", "res_air"]
-    ], key=lambda x: monster_infos[x], reverse=False
+    ], key=lambda x: monster_infos.get(x, 0), reverse=False
     )
 
     if any([monster_infos.get(res, 0) < 0 for res in resistances]):
@@ -480,38 +480,45 @@ async def get_monster_vulnerabilities(monster_infos: dict) -> dict[str, int]:
     else:
         resistances = [resistances[0]]      # FIXME get the lesser values
 
-    return {resistance.replace("res_", ""): -1 * monster_infos[resistance] for resistance in resistances}
+    if resistances == ['res_fire', 'res_water']:
+        resistances = ['res_water']
+
+    logging.warning(f' Here is the resistances: {resistances}')
+
+    return {resistance.replace("res_", ""): -1 * monster_infos.get(resistance, 0) for resistance in resistances}
 
 
-async def select_best_equipment_set(current_equipment: dict, sorted_valid_equipments: dict[str, list[dict]], vulnerabilities: dict) -> dict:
+async def select_best_equipment_set(current_equipments: dict, sorted_valid_equipments: dict[str, list[dict]], vulnerabilities: dict) -> dict[str, dict]:
     """
     Selects the best equipment set based on monster vulnerabilities and equipment effects.
 
-    :param current_equipment: The currently equipped items per slot (or empty dict if none equipped).
+    :param current_equipments: The currently equipped items per slot (or empty dict if none equipped).
     :param sorted_valid_equipments: A dictionary of lists of valid equipment items per slot, sorted by level.
     :param vulnerabilities: A dictionary of the monster's elemental vulnerabilities with their percentages.
     :return: The selected best equipment set.
     """
-    selected_equipment = {}
+    selected_equipments = {}
 
     # First, select the best weapon based on vulnerabilities
-    weapon_current = current_equipment.get('weapon', {})
+    weapon_current = current_equipments.get('weapon', {})
     weapon_list = sorted_valid_equipments.get('weapon', [])
     best_weapon = select_best_weapon(weapon_current, weapon_list, vulnerabilities)
-    selected_equipment['weapon'] = best_weapon
+    selected_equipments['weapon'] = best_weapon
 
     # Determine the primary attack elements of the selected weapon
     weapon_effects = {effect['name']: effect['value'] for effect in best_weapon.get('effects', [])}
     primary_attack_elements = [effect_name.replace('attack_', '') for effect_name in weapon_effects.keys() if effect_name.startswith('attack_')]
 
     # Now, select the best equipment for other slots that enhance the selected weapon
-    for slot in ['ring', 'amulet', 'armor']:
-        current_item = current_equipment.get(slot, {})
+    for slot in EQUIPMENTS_SLOTS:
+        if slot == 'weapon':
+            continue
+        current_item = current_equipments.get(slot, {})
         equipment_list = sorted_valid_equipments.get(slot, [])
         best_item = select_best_support_equipment(current_item, equipment_list, primary_attack_elements)
-        selected_equipment[slot] = best_item
+        selected_equipments[slot] = best_item
 
-    return selected_equipment
+    return selected_equipments
 
 
 def select_best_weapon(current_weapon: dict, weapon_list: list[dict], vulnerabilities: dict) -> dict:
@@ -527,7 +534,7 @@ def select_best_weapon(current_weapon: dict, weapon_list: list[dict], vulnerabil
     vulnerability_percentages = list(vulnerabilities.values())
     vulnerabilities_equal = all(pct == vulnerability_percentages[0] for pct in vulnerability_percentages)
 
-    def calculate_weapon_score(_effects: dict, _vulnerabilities: dict, vulnerabilities_equal: bool) -> float:
+    def calculate_weapon_score(_effects: dict, _vulnerabilities: dict, _vulnerabilities_equal: bool) -> float:
         """
         Calculate the weapon score based on the effects and vulnerabilities.
         """
@@ -537,7 +544,7 @@ def select_best_weapon(current_weapon: dict, weapon_list: list[dict], vulnerabil
             if effect_name.startswith("attack_"):
                 element = effect_name.replace("attack_", "")
                 total_attack += effect_value
-                if vulnerabilities_equal:
+                if _vulnerabilities_equal:
                     score += effect_value * 4  # High weight for attack effects
                 else:
                     if element in _vulnerabilities:
@@ -547,7 +554,7 @@ def select_best_weapon(current_weapon: dict, weapon_list: list[dict], vulnerabil
                         score += effect_value  # Lesser weight for non-vulnerable elements
             elif effect_name.startswith("dmg_"):
                 element = effect_name.replace("dmg_", "")
-                if vulnerabilities_equal:
+                if _vulnerabilities_equal:
                     score += effect_value * 3
                 else:
                     if element in _vulnerabilities:
@@ -561,7 +568,7 @@ def select_best_weapon(current_weapon: dict, weapon_list: list[dict], vulnerabil
                 score += effect_value  # Default score for other effects
 
         # If vulnerabilities are equal, prioritize equipment with the highest total attack
-        if vulnerabilities_equal:
+        if _vulnerabilities_equal:
             score += total_attack * 2  # Additional weight for total attack
         return score
 
@@ -722,8 +729,6 @@ class Task:
 
     async def is_feasible(self, character_max_level: int) -> bool:
         if self.type == "monsters" and self.details['level'] <= character_max_level:
-            if self.code == "imp":
-                return False
             return True
         return False
 
@@ -1318,11 +1323,17 @@ class Character:
         infos = await self.get_infos()
         return infos[f'{_equipment_slot}_slot']
 
+    async def get_current_equipments(self) -> dict[str, dict]:
+        infos = await self.get_infos()
+        return {
+            equipment_slot: await get_item_infos(self.session, infos[f'{equipment_slot}_slot']) if infos[f'{equipment_slot}_slot'] != "" else {}
+            for equipment_slot in EQUIPMENTS_SLOTS
+        }
+
     async def go_and_equip(self, _equipment_slot: str, _equipment_code: str):
         current_equipment_code = await self.get_equipment_code(_equipment_slot)
         if current_equipment_code != _equipment_code:
             self.logger.debug(f' will change equipment for {_equipment_slot} from {current_equipment_code} to {_equipment_code}')
-            await self.move_to_bank()
             await self.withdraw_items_from_bank({_equipment_code: 1})
             if current_equipment_code != "":
                 await self.unequip(_equipment_slot)
@@ -1641,14 +1652,32 @@ class Character:
             if self.equipments.get(item_code, None) is not None and self.equipments[item_code]['type'] in equipment_slot
         ]
 
+    async def get_sorted_valid_bank_equipments(self) -> dict[str, list[dict]]:
+        bank_items = await get_bank_items(self.session)
+        bank_equipments ={}
+        for equipment_slot in EQUIPMENTS_SLOTS:
+            slot_equipments = [
+                self.equipments[item_code]
+                for item_code in bank_items.keys()
+                # 'ring' in 'ring1'
+                if self.equipments.get(item_code, None) is not None and self.equipments[item_code]['type'] in equipment_slot
+            ]
+            sorted_slot_equipments = sorted([
+                equipment
+                for equipment in slot_equipments
+                if await self.is_valid_equipment(equipment)
+            ], key=lambda x: x['level'], reverse=True)
+            bank_equipments[equipment_slot] = sorted_slot_equipments
+        return bank_equipments
+
     async def manage_task(self):
-        character_infos = await self.get_infos()
+        game_task = await self.get_game_task()
         # if task completed (or none assigned yet), go to get rewards and renew task
         if await self.is_task_completed():
             # go to task master
             await self.move_to_task_master()
             # if task, get reward
-            if character_infos["task"] != "":
+            if game_task.code != "":
                 await self.complete_task()
             # ask for new task
             await self.accept_new_task()
@@ -1827,7 +1856,6 @@ class Character:
             await self.gather_material(self.task.code, self.task.total)
 
         elif self.task.type == 'recycle':
-            await self.move_to_bank()
             await self.withdraw_items_from_bank({self.task.code: self.task.total})
             await self.move_to_workshop()
             cooldown = await self.perform_recycling(self.task.code, self.task.total)
@@ -1868,16 +1896,21 @@ class Character:
 
         if self.task.type in ['monsters', 'event']:
             # Identify vulnerability
-            monster_infos = await get_monster_infos(self.session, self.task.code)
+            monster_infos = self.task.details
             vulnerabilities = await get_monster_vulnerabilities(monster_infos=monster_infos)
+
+            # FIXME
+            if self.task.code == 'bandit_lizard':
+                vulnerabilities = {"water": 5}
+
             self.logger.info(f' monster {self.task.code} vulnerabilities are {vulnerabilities}')
 
+            current_equipments = await self.get_current_equipments()
+            sorted_valid_bank_equipments = await self.get_sorted_valid_bank_equipments()
 
-
-            # Manage equipment
-            for equipment_slot in ['weapon', 'shield', 'helmet', 'body_armor', 'leg_armor', 'boots', 'ring1', 'ring2',
-                                   'amulet', 'artifact1', 'artifact2', 'artifact3']:
-                await self.equip_best_equipment(equipment_slot, vulnerabilities)
+            selected_equipments = await select_best_equipment_set(current_equipments, sorted_valid_bank_equipments, vulnerabilities)
+            for equipment_slot, equipment_details in selected_equipments.items():
+                await self.go_and_equip(equipment_slot, equipment_details.get('code', ""))
 
             # Manage consumables
             await self.equip_best_consumables()
@@ -1982,7 +2015,8 @@ async def run_bot(character_object: Character):
 
         ### SET TASK BEGIN ###
         # Check if game task is feasible, assign if it is / necessarily existing
-        event_task = await character_object.get_event_task()
+        # event_task = await character_object.get_event_task()
+        event_task = None
         game_task = await character_object.get_game_task()
         recycling_task = await character_object.get_recycling_task()
         craft_for_equiping_task = await character_object.get_craft_for_equiping_task()
@@ -2068,8 +2102,6 @@ async def run_bot(character_object: Character):
 async def main():
     async with aiohttp.ClientSession() as session:
 
-        EXCLUDED_MATERIALS = ["jasper_crystal"]     # type = "resource" + subtype = "task"
-
         all_items = {
             crafting_skill: await get_all_items(session, params={"craft_skill": crafting_skill})
             for crafting_skill in ['weaponcrafting', 'gearcrafting', 'jewelrycrafting', 'cooking', 'woodcutting', 'mining']
@@ -2092,11 +2124,11 @@ async def main():
         # LOCAL_BANK = await get_bank_items(session)
 
         characters_ = [
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Kersh', max_fight_level=28, skills=['weaponcrafting', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Capu', max_fight_level=28, skills=['gearcrafting','woodcutting', 'mining']),  # 'gearcrafting',
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Brubu', max_fight_level=28, skills=['woodcutting', 'mining']),  # , 'fishing', 'mining', 'woodcutting'
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Crabex', max_fight_level=28, skills=['jewelrycrafting', 'woodcutting', 'mining']),  # 'jewelrycrafting', 'woodcutting'
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='JeaGa', max_fight_level=28, skills=['mining', 'woodcutting']),  # 'cooking', 'fishing'
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Kersh', max_fight_level=30, skills=['weaponcrafting', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Capu', max_fight_level=30, skills=['gearcrafting','woodcutting', 'mining']),  # 'gearcrafting',
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Brubu', max_fight_level=30, skills=['woodcutting', 'mining']),  # , 'fishing', 'mining', 'woodcutting'
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Crabex', max_fight_level=30, skills=['jewelrycrafting', 'woodcutting', 'mining']),  # 'jewelrycrafting', 'woodcutting'
+            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='JeaGa', max_fight_level=30, skills=['mining', 'woodcutting']),  # 'cooking', 'fishing'
         ]
 
         # Initialize all characters asynchronously
