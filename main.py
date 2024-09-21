@@ -311,11 +311,10 @@ async def get_resource_infos(session: aiohttp.ClientSession, _resource_code: str
     return data["data"] if data else {}
 
 
-async def get_craft_recipee(session: aiohttp.ClientSession, _item_code: str) -> dict[str, int]:
-    item_infos = await get_item_infos(session, _item_code)
-    if item_infos.get('craft', None) is not None:
-        return {m['code']: m['quantity'] for m in item_infos['craft']['items']}
-    logging.error(f'This material {_item_code} is not craftable')
+def get_craft_recipee(_item: dict) -> dict[str, int]:
+    if _item.get('craft', None) is not None:
+        return {m['code']: m['quantity'] for m in _item['craft']['items']}
+    logging.error(f'This material {_item["code"]} is not craftable')
     return {}
 
 
@@ -890,8 +889,10 @@ class Character:
         elif item_category == 'dropped_resource':
             return item["code"] in [i['code'] for i in self.fightable_materials]
         elif item_category == 'craftable_resource':
-            craft_recipee = await get_craft_recipee(self.session, _item_code=item["code"])
-            return all([await self.can_be_home_made(self.items[material_code]) for material_code in list(craft_recipee.keys())])
+            return all([
+                await self.can_be_home_made(self.items[material_code])
+                for material_code in list(get_craft_recipee(item).keys())
+            ])
         elif item_category == 'given_resource':
             return False
         else:
@@ -1187,10 +1188,10 @@ class Character:
                 return item_infos['quantity']
         return 0
 
-    async def get_nb_craftable_items(self, _item_code: str, from_inventory: bool = False) -> int:
+    async def get_nb_craftable_items(self, _item: dict, from_inventory: bool = False) -> int:
 
-        craft_recipee = await get_craft_recipee(self.session, _item_code)
-        self.logger.debug(f' recipee for {_item_code} is {craft_recipee}')
+        craft_recipee = get_craft_recipee(_item)
+        self.logger.debug(f' recipee for {_item["code"]} is {craft_recipee}')
         total_nb_materials = sum([qty for _, qty in craft_recipee.items()])
         nb_craftable_items = await self.get_inventory_max_size() // total_nb_materials
 
@@ -1199,7 +1200,7 @@ class Character:
                 material_inventory_qty = await self.get_inventory_quantity(material_code)
                 nb_craftable_items = min(material_inventory_qty//qty, nb_craftable_items)
 
-        self.logger.debug(f' nb of craftable items {"from inventory" if from_inventory else ""} for {_item_code} is {nb_craftable_items}')
+        self.logger.debug(f' nb of craftable items {"from inventory" if from_inventory else ""} for {_item["code"]} is {nb_craftable_items}')
 
         return nb_craftable_items
 
@@ -1275,26 +1276,25 @@ class Character:
             self.logger.error(f'failed to gather resources.')
             return 0
 
-    async def perform_recycling(self, item_code: str, qte: int) -> int:
+    async def perform_recycling(self, item: dict, qte: int) -> int:
         url = f"{SERVER}/my/{self.name}/action/recycling"
         payload = {
-            "code": item_code,
+            "code": item["code"],
             "quantity": qte
         }
 
         # SECURITY CHECK ON RARE ITEMS
-        craft_recipee = await get_craft_recipee(self.session, item_code)
-        if 'jasper_crystal' in craft_recipee.keys():
-            self.logger.warning(f' Item {item_code} is rare so better not to recycle it.')
+        if 'jasper_crystal' in get_craft_recipee(item).keys():
+            self.logger.warning(f' Item {item["code"]} is rare so better not to recycle it.')
             return 0
 
         data = await make_request(session=self.session, method='POST', url=url, payload=payload)
         if data:
             _cooldown = data["data"]["cooldown"]["total_seconds"]
-            self.logger.info(f'{qte} {item_code} recycled. Cooldown: {_cooldown} seconds')
+            self.logger.info(f'{qte} {item["code"]} recycled. Cooldown: {_cooldown} seconds')
             return _cooldown
         else:
-            self.logger.error(f'failed to recycle {qte} {item_code}.')
+            self.logger.error(f'failed to recycle {qte} {item["code"]}.')
             return 0
 
     async def is_gatherable(self, resource_code) -> bool:
@@ -1737,11 +1737,9 @@ class Character:
                 recycle_details[item_code] = item_qty - min_qty
         return recycle_details
 
-    async def is_worth_selling(self, _item_code) -> bool:
-        item_infos = self.items.get(_item_code, {})
-        item_gold_value = item_infos["ge"]["sell_price"]
-        craft_recipee = await get_craft_recipee(self.session, _item_code)
-        materials = [self.items[material] for material in craft_recipee.keys()]
+    async def is_worth_selling(self, _item: dict) -> bool:
+        item_gold_value = _item["ge"]["sell_price"]     # FIXME this could be moving // need to be up to date
+        materials = [self.items[material] for material in get_craft_recipee(_item).keys()]
         if any([await is_protected_material(self.session, material["code"]) for material in materials]):
             return False
         gold_value_sorted_materials = sorted(materials, key=lambda x: x["ge"]["buy_price"], reverse=True)
@@ -1765,41 +1763,34 @@ class Character:
             details=task_details
         )
 
-    async def get_task_type(self, item_details: dict) -> str:
-        if item_details['code'] in [item['code'] for item in self.craftable_items]:
-            return 'items'
-        if item_details['code'] in [item['code'] for item in self.gatherable_resources]:
-            return 'resources'
-        if item_details['code'] in [item['code'] for item in self.fightable_materials]:
-            return 'monsters'
-        self.logger.error(f'Unknown item {item_details}')
-        return 'unknown'
-
     async def get_best_objective(self):
         return self.objectives[0]
 
-    async def get_task(self, item_code: str = None) -> Task:
+    async def set_task(self, item: dict, task_type: str, quantity: int):
+        total_nb_materials = sum([qty for _, qty in get_craft_recipee(item).items()])
+        self.task = Task(
+            code=item["code"],
+            type=task_type,
+            total=min(await self.get_inventory_max_size(), quantity) // total_nb_materials,
+            details=item
+        )
 
-        if item_code is None:
-            objective = await self.get_best_objective()
-        else:
-            objective = self.items[item_code]
+    async def get_task(self) -> Task:
 
-        task_type = await self.get_task_type(objective)       # resources / monsters / items
+        objective = await self.get_best_objective()     # FIXME get it depending on potential XP gain
 
-        if task_type == 'monsters':
-            target_code = await get_dropping_monster_locations(self.session, objective['code'])
-        else:
-            target_code = objective['code']
+        # FIXME could be checked here amongst craftable items first, then gatherable ones
 
-        if task_type == 'items':
-            craft_recipee = await get_craft_recipee(self.session, target_code)
-            total_nb_materials = sum([qty for _, qty in craft_recipee.items()])
-        else:
+        # objective is an item > task will be crafting or gathering
+        if objective["code"] in [item['code'] for item in self.gatherable_resources]:
             total_nb_materials = 1
+            task_type = "resources"
+        else:   # Not gatherable -> Means it is craftable
+            total_nb_materials = sum([qty for _, qty in get_craft_recipee(objective).items()])
+            task_type = "items"
 
         return Task(
-            code=target_code,
+            code=objective["code"],
             type=task_type,
             total=(await self.get_inventory_max_size()) // total_nb_materials,
             details=objective
@@ -1836,8 +1827,7 @@ class Character:
             if await self.is_craftable(material):
                 # Set material as craft target
                 self.logger.info(f' Resetting task to {material}')
-                resetted_task = await self.get_task(material)
-                self.task = resetted_task
+                await self.set_task(self.items[material], "items", qty)
                 # "Dé-réserver" les articles de banque
                 return await self.prepare_for_task()
             if await self.is_gatherable(material):
@@ -1892,18 +1882,17 @@ class Character:
         elif self.task.type == 'recycle':
             await self.withdraw_items_from_bank({self.task.code: self.task.total})
             await self.move_to_workshop()
-            cooldown = await self.perform_recycling(self.task.code, self.task.total)
+            cooldown = await self.perform_recycling(self.task.details, self.task.total)
             await asyncio.sleep(cooldown)
 
         elif self.task.type == 'items':
             # if all available at bank -> pick it and go craft
-            craft_recipee = await get_craft_recipee(self.session, self.task.code)
             # nb_items_to_craft = await self.get_nb_craftable_items(self.task.code, from_inventory=True)
-            nb_items_to_craft = await self.get_nb_craftable_items(self.task.code)
+            nb_items_to_craft = await self.get_nb_craftable_items(self.task.details)
             craft_details = {
                 material_code: material_unit_qty * min(self.task.total, nb_items_to_craft)
                 # material_code: material_unit_qty * self.task.total
-                for material_code, material_unit_qty in craft_recipee.items()
+                for material_code, material_unit_qty in get_craft_recipee(self.task.details).items()
             }
 
             # Checking if all is available in inventory
@@ -1919,7 +1908,7 @@ class Character:
                 await self.gather_and_collect(task_details)
 
             # Taking withdraw fails into account
-            nb_items_to_craft = await self.get_nb_craftable_items(self.task.code, from_inventory=True)
+            nb_items_to_craft = await self.get_nb_craftable_items(self.task.details, from_inventory=True)
 
             if nb_items_to_craft > 0:
                 await self.move_to_workshop(self.task.code)
