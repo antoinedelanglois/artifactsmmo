@@ -106,6 +106,22 @@ async def make_request(session, method, url, params=None, payload=None, retries=
     return None
 
 
+async def get_status(session: aiohttp.ClientSession) -> dict:
+    url = f"{SERVER}/"
+    data = await make_request(session=session, method='GET', url=url)
+    return data["data"] if data else {}
+
+
+async def get_max_level(session: aiohttp.ClientSession) -> int:
+    status = await get_status(session)
+    return status["max_level"]
+
+
+async def get_server_time(session: aiohttp.ClientSession) -> str:
+    status = await get_status(session)
+    return status["server_time"]
+
+
 def extract_cooldown_time(message):
     """Extracts cooldown time from the message using regex."""
     match = re.search(r"Character in cooldown: (\d+)", message)
@@ -291,7 +307,7 @@ async def get_craft_recipee(session: aiohttp.ClientSession, _item_code: str) -> 
     return {}
 
 
-async def get_all_events(session: aiohttp.ClientSession, params: dict = None) -> list:
+async def get_all_events(session: aiohttp.ClientSession, params: dict = None) -> list[dict]:
     """
     Retrieves all maps from the API.
     Returns a list of maps with their details.
@@ -1413,7 +1429,7 @@ class Character:
     async def does_fight_provide_xp(self, monster: dict) -> bool:
         character_level = await self.get_level()
         monster_level = monster['level']
-        return monster_level >= (character_level - 10)
+        return monster_level >= (character_level - 10) and character_level < await get_max_level(self.session)
 
     async def select_eligible_targets(self) -> list[str]:
         """
@@ -1834,6 +1850,13 @@ class Character:
             'fight': fight_details
         }
 
+    async def is_event_still_on(self):
+        all_events = await get_all_events(self.session)
+        all_events_codes = [event['map']['content']['code'] for event in all_events]
+        if self.task.code in all_events_codes:
+            return True
+        return False
+
     async def execute_task(self):
 
         # TODO if inventory filled up, deposit?
@@ -1852,7 +1875,7 @@ class Character:
         elif self.task.type == 'event':
             await self.move(*self.task.details['location'])
             self.logger.info(f'fighting {self.task.code} ...')
-            while await self.is_up_to_fight():  # Includes "task completed" check > TODO add dropped material count
+            while await self.is_up_to_fight() and await self.is_event_still_on():
                 # TODO decrement task total on each won combat
                 cooldown_ = await self.perform_fighting()
                 await asyncio.sleep(cooldown_)
@@ -1940,7 +1963,6 @@ class Character:
 
     async def get_fight_for_leveling_up_task(self) -> Task:
         # If XP can be gained by fighting, go
-        # highest_fightable_monster = sorted(self.fightable_monsters, key=lambda x: x['level'], reverse=True)[0]
         if len(self.fight_objectives) > 0:
             highest_fightable_monster = self.fight_objectives[0]
             return Task(
@@ -1979,7 +2001,7 @@ class Character:
     async def get_event_task(self) -> Task:
         all_events = await get_all_events(self.session)
         for event in all_events:
-            if event["name"] == "Bandit Camp":
+            if event["name"] in ["Bandit Camp", "Portal"]:
                 monster_code = event["map"]["content"]["code"]
                 monster_details = await get_monster_infos(self.session, monster_code)
                 monster_details['location'] = (event["map"]["x"], event["map"]["y"])
@@ -2005,15 +2027,16 @@ async def run_bot(character_object: Character):
 
         ### SET TASK BEGIN ###
         # Check if game task is feasible, assign if it is / necessarily existing
-        # event_task = await character_object.get_event_task()
-        event_task = None
+        event_task = await character_object.get_event_task()
+        # event_task = None
         game_task = await character_object.get_game_task()
         recycling_task = await character_object.get_recycling_task()
         craft_for_equiping_task = await character_object.get_craft_for_equiping_task()
         fight_for_leveling_up_task = await character_object.get_fight_for_leveling_up_task()
         if event_task is not None:
             character_object.task = event_task
-        elif await game_task.is_feasible(character_object.max_fight_level):
+        # No need to do game tasks if already a lot of task coins
+        elif await game_task.is_feasible(character_object.max_fight_level) and await get_bank_item_qty(character_object.session, "tasks_coin") < 70:
             character_object.task = game_task
         elif recycling_task is not None:
             character_object.task = recycling_task
