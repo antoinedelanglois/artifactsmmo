@@ -130,22 +130,34 @@ def extract_cooldown_time(message):
     return None
 
 
-async def get_crafted_items(session: aiohttp.ClientSession) -> dict[str, dict]:
-    equipments = {}
-    skills_list = ['weaponcrafting', 'gearcrafting', 'jewelrycrafting', 'cooking']
-    for skill_name in skills_list:
-        equipments[skill_name] = {
-            i["code"]: i
-            for i in await get_all_items(session, params={'craft_skill': skill_name})
-        }
-    return equipments
+def get_items_list_by_craft_skill(_items: dict[str, dict], craft_skill_name: str) -> list[dict]:
+    return [
+        item
+        for _, item in _items.items()
+        if item["craft"] and item["craft"]["skill"] == craft_skill_name
+    ]
 
 
-async def get_equipments_by_type(session: aiohttp.ClientSession) -> dict[str, list[dict]]:
-    equipments = {}
-    for equipment_type in EQUIPMENTS_TYPES:
-        equipments[equipment_type] = await get_all_items(session, params={'type': equipment_type})
-    return equipments
+def get_items_list_by_type(_items: dict[str, dict], _item_type: str) -> list[dict]:
+    return [
+        item
+        for _, item in _items.items()
+        if item["type"] == _item_type
+    ]
+
+
+def get_crafted_items(_items: dict[str, dict]) -> dict[str, dict]:
+    return {
+        skill_name: {item["code"]: item for item in get_items_list_by_craft_skill(_items, skill_name)}
+        for skill_name in ['weaponcrafting', 'gearcrafting', 'jewelrycrafting', 'cooking']
+    }
+
+
+def get_equipments_by_type(_items: dict[str, dict]) -> dict[str, list[dict]]:
+    return {
+        equipment_type: get_items_list_by_type(_items, equipment_type)
+        for equipment_type in EQUIPMENTS_TYPES
+    }
 
 
 def is_equipment_better(equipment_a: dict, equipment_b: dict) -> bool:
@@ -216,8 +228,8 @@ def identify_obsolete_equipments_optimized(equipment_groups: dict[str, list[dict
     return obsolete_equipments
 
 
-async def get_obsolete_equipments(session: aiohttp.ClientSession) -> list[dict]:
-    equipment_groups = await get_equipments_by_type(session)
+async def get_obsolete_equipments(session: aiohttp.ClientSession, _items: dict[str, dict]) -> list[dict]:
+    equipment_groups = get_equipments_by_type(_items)
 
     # Filter the existing equipments on map
     map_equipments = {}
@@ -225,7 +237,7 @@ async def get_obsolete_equipments(session: aiohttp.ClientSession) -> list[dict]:
         filtered_equipments = []
         for equipment in equipments:
             # Only if minimum quantity available
-            if await get_all_map_item_qty(session, equipment["code"]) >= await get_min_stock_qty(session, equipment["code"]):
+            if await get_all_map_item_qty(session, equipment) >= get_min_stock_qty(equipment):
                 filtered_equipments.append(equipment)
         map_equipments[equipment_type] = filtered_equipments
 
@@ -266,10 +278,10 @@ async def get_all_items_quantities(session: aiohttp.ClientSession) -> dict[str, 
     return total_quantities
 
 
-async def needs_stock(session: aiohttp.ClientSession, _item_code: str, total_quantities: dict[str, int] = None) -> bool:
+async def needs_stock(session: aiohttp.ClientSession, _item: dict, total_quantities: dict[str, int] = None) -> bool:
     if total_quantities is None:
         total_quantities = await get_all_items_quantities(session)
-    return await get_all_map_item_qty(session, _item_code, total_quantities) < await get_min_stock_qty(session, _item_code)
+    return await get_all_map_item_qty(session, _item, total_quantities) < get_min_stock_qty(_item)
 
 
 async def get_bank_items(session: aiohttp.ClientSession, params: dict = None) -> dict:
@@ -365,15 +377,14 @@ async def get_equipments_qty(session: aiohttp.ClientSession) -> dict[str, int]:
     return equipments_dict
 
 
-async def get_all_map_item_qty(session: aiohttp.ClientSession, _item_code: str, total_quantities: dict[str, int] = None) -> int:
+async def get_all_map_item_qty(session: aiohttp.ClientSession, _item: dict, total_quantities: dict[str, int] = None) -> int:
     if total_quantities is None:
         total_quantities = await get_all_items_quantities(session)
-    return total_quantities.get(_item_code, 0)
+    return total_quantities.get(_item["code"], 0)
 
 
-async def get_min_stock_qty(session: aiohttp.ClientSession, item_code: str) -> int:
-    item_details = await get_item_infos(session, item_code)
-    if item_details["type"] == "ring":
+def get_min_stock_qty(item: dict) -> int:
+    if item["type"] == "ring":
         return 10
     return 5
 
@@ -415,7 +426,9 @@ async def get_monster_infos(session: aiohttp.ClientSession, _monster_code: str) 
     return data["data"] if data else {}
 
 
-async def get_all_items(session: aiohttp.ClientSession, params: dict) -> list[dict]:
+async def get_all_items(session: aiohttp.ClientSession, params: dict = None) -> list[dict]:
+    if params is None:
+        params = {}
     items = []
     page = 1
     while True:
@@ -736,6 +749,19 @@ async def select_best_equipment(equipment1_infos: dict, sorted_valid_equipments:
     return best_equipment
 
 
+def get_item_category(_item: dict) -> str:
+    if _item["craft"] is None and _item["type"] == "resource" and _item["subtype"] in ["mining", "woodcutting", "fishing"]:
+        return 'gathered_resource'
+    if _item["craft"] is None and _item["type"] == "resource" and _item["subtype"] in ["mob", "food"]:
+        return 'dropped_resource'
+    if _item["craft"] is not None:
+        return 'craftable_resource'
+    # 'jasper_crystal' is resource > task // 'lich_crown' is helmet > ""
+    if _item["code"] in ['wooden_stick', 'bandit_armor', 'death_knight_sword', 'lich_crown', 'life_crystal'] or _item["subtype"] in ["task"] or _item["type"] in ["currency"]:
+        return 'given_resource'
+    return 'UNKNOWN'
+
+
 @dataclass
 class Task:
     code: str = ""
@@ -753,7 +779,7 @@ class Task:
 class Character:
     session: aiohttp.ClientSession
     all_equipments: dict[str, dict]     # TODO get it to dataclass
-    all_items: dict[str, list[dict]]
+    items: dict[str, dict]
     excluded_items: dict[str, list[dict]]
     name: str
     skills: list[str]
@@ -768,14 +794,7 @@ class Character:
     fight_objectives: list[dict] = field(default_factory=list)
 
     def __post_init__(self):
-        # Custom logger setup
         self.logger = logging.getLogger(self.name)
-        # handler = logging.StreamHandler()
-        # formatter = logging.Formatter(f'%(asctime)s - {self.name} - [%(levelname)s] %(message)s')
-        # handler.setFormatter(formatter)
-        # self.logger.addHandler(handler)
-        # self.logger.propagate = False
-
         self.excluded_equipments = list(self.all_equipments['excluded'].keys())  # FIXME Shared amongst all characters
         self.equipments = {k: v for c, e in self.all_equipments.items() for k, v in e.items() if c != 'excluded'}
 
@@ -807,9 +826,10 @@ class Character:
             }
             gatherable_resources_spots.extend(await get_all_resources(self.session, params=params))
 
+        resources_dict = {item["code"]: item for item in get_items_list_by_type(self.items, "resource")}
+
         self.gatherable_resources = [
-            # await get_item_infos(self.session, dropped_material['code'])
-            {item["code"]: item for item in self.all_items['resources']}[dropped_material['code']]
+            resources_dict[dropped_material['code']]
             for gatherable_resources_spot in gatherable_resources_spots
             for dropped_material in gatherable_resources_spot['drops']
             if (not await is_protected_material(self.session, dropped_material['code'])) and dropped_material['rate'] <= 100   # Exclude protected material
@@ -827,13 +847,14 @@ class Character:
             if crafting_skill == 'fishing':
                 crafting_skill = 'cooking'
             skill_level = infos[f'{crafting_skill}_level']
-            skill_craftable_items = [item for item in self.all_items[crafting_skill] if item['level'] <= skill_level]
+            skill_craftable_items = [item for item in get_items_list_by_craft_skill(self.items, crafting_skill) if item['level'] <= skill_level]
             self.logger.debug(f' crafting_skill: {crafting_skill} > {[i["code"] for i in skill_craftable_items]}')
             craftable_items.extend(skill_craftable_items[::-1])
         # TODO exclude protected items (such as the one using jasper_crystal)
         filtered_craftable_items = [
             item
             for item in craftable_items
+            if item['code'] not in ['strangold', 'obsidian']    # FIXME dynamic exclusion
         ]
         self.craftable_items = filtered_craftable_items
         self.logger.warning(f"Craftable items for {self.name}: {[i['code'] for i in self.craftable_items]}")
@@ -850,8 +871,7 @@ class Character:
         }
         self.fightable_monsters = await get_all_monsters(self.session, params=params)
         self.fightable_materials = [
-            # await get_item_infos(self.session, drop['code'])
-            {item["code"]: item for item in self.all_items['resources']}[drop['code']]
+            {item["code"]: item for item in get_items_list_by_type(self.items, "resource")}[drop['code']]
             for monster_details in self.fightable_monsters
             for drop in monster_details['drops']
             if drop['rate'] <= 25
@@ -859,49 +879,36 @@ class Character:
         self.logger.debug(f"Fightable monsters for {self.name}: {[m['code'] for m in self.fightable_monsters]}")
         self.logger.debug(f"Fightable materials for {self.name}: {[m['code'] for m in self.fightable_materials]}")
 
-    async def get_item_category(self, _item_code) -> str:
-        item_details = await get_item_infos(self.session, _item_code)
-        if item_details["craft"] is None and item_details["type"] == "resource" and item_details["subtype"] in ["mining", "woodcutting", "fishing"]:
-            return 'gathered_resource'
-        if item_details["craft"] is None and item_details["type"] == "resource" and item_details["subtype"] in ["mob", "food"]:
-            return 'dropped_resource'
-        if item_details["craft"] is not None:
-            return 'craftable_resource'
-        # 'jasper_crystal' is resource > task // 'lich_crown' is helmet > ""
-        if _item_code in ['wooden_stick', 'tasks_coin', 'bandit_armor', 'death_knight_sword', 'lich_crown', 'life_crystal'] or item_details["subtype"] in ["task"]:
-            return 'given_resource'
-        return 'UNKNOWN'
-
-    async def can_be_home_made(self, item_code: str) -> bool:
+    async def can_be_home_made(self, item: dict) -> bool:
         # if item out of resource: is it gatherable
         # if item out of mob/drop: is it fightable
         # if craftable item: can all material be home made?
-        item_category = await self.get_item_category(item_code)
-        self.logger.debug(f' Checking if {item_code} can be home made from its category {item_category}')
+        item_category = get_item_category(item)
+        self.logger.debug(f' Checking if {item["code"]} can be home made from its category {item_category}')
         if item_category == 'gathered_resource':
-            return item_code in [i['code'] for i in self.gatherable_resources]
+            return item["code"] in [i['code'] for i in self.gatherable_resources]
         elif item_category == 'dropped_resource':
-            return item_code in [i['code'] for i in self.fightable_materials]
+            return item["code"] in [i['code'] for i in self.fightable_materials]
         elif item_category == 'craftable_resource':
-            craft_recipee = await get_craft_recipee(self.session, _item_code=item_code)
-            return all([await self.can_be_home_made(material_code) for material_code in list(craft_recipee.keys())])
+            craft_recipee = await get_craft_recipee(self.session, _item_code=item["code"])
+            return all([await self.can_be_home_made(self.items[material_code]) for material_code in list(craft_recipee.keys())])
         elif item_category == 'given_resource':
             return False
         else:
-            self.logger.warning(f' {item_code} to categorize')
+            self.logger.warning(f' {item["code"]} to categorize')
 
     async def set_objectives(self):
         # Out of craftable items, which one can be handled autonomously
         objectives = [
             item
             for item in self.craftable_items
-            if await self.can_be_home_made(item['code']) and await self.does_item_provide_xp(item)
+            if await self.can_be_home_made(item) and await self.does_item_provide_xp(item)
         ]
 
         need_level_up_craftable_items = [
             item
             for item in self.craftable_items
-            if not await self.can_be_home_made(item['code']) and await self.does_item_provide_xp(item)
+            if not await self.can_be_home_made(item) and await self.does_item_provide_xp(item)
         ]
         self.logger.info(f' NEED LEVELING UP OR SPECIAL MATERIALS TO CRAFT: {[o["code"] for o in need_level_up_craftable_items]}')
 
@@ -916,7 +923,7 @@ class Character:
         resource_objectives = [
             resource
             for resource in self.gatherable_resources
-            if await self.can_be_home_made(resource['code']) and await self.does_item_provide_xp(resource)
+            if await self.can_be_home_made(resource) and await self.does_item_provide_xp(resource)
         ]
 
         item_objectives.extend(resource_objectives[::-1])
@@ -925,15 +932,15 @@ class Character:
         fight_objectives = [
             monster
             for monster in self.fightable_monsters
-            if await self.can_be_vanquished(monster['code']) and await self.does_fight_provide_xp(monster)
+            if await self.can_be_vanquished(monster) and await self.does_fight_provide_xp(monster)
         ]
 
         self.objectives = item_objectives
         self.fight_objectives = fight_objectives[::-1]
         self.logger.info(f' CAN GET XP WITH: {[o["code"] for o in self.objectives]}')
 
-    async def can_be_vanquished(self, monster_code: str) -> bool:
-        return monster_code in [m["code"] for m in self.fightable_monsters]
+    async def can_be_vanquished(self, monster: dict) -> bool:
+        return monster["code"] in [m["code"] for m in self.fightable_monsters]
 
     async def get_infos(self) -> dict:
         url = f"{SERVER}/characters/{self.name}"
@@ -1309,7 +1316,7 @@ class Character:
         if item_code is None:
             item_code = self.task.code
         # get the skill out of item
-        item_infos = await get_item_infos(self.session, item_code)
+        item_infos = self.items[item_code]
         skill_name = item_infos['craft']['skill']
         coords = await self.get_nearest_coords(content_type='workshop', content_code=skill_name)
         self.logger.debug(f'{self.name} > moving to workshop at {coords}')
@@ -1336,7 +1343,7 @@ class Character:
     async def get_current_equipments(self) -> dict[str, dict]:
         infos = await self.get_infos()
         return {
-            equipment_slot: await get_item_infos(self.session, infos[f'{equipment_slot}_slot']) if infos[f'{equipment_slot}_slot'] != "" else {}
+            equipment_slot: self.items[infos[f'{equipment_slot}_slot']] if infos[f'{equipment_slot}_slot'] != "" else {}
             for equipment_slot in EQUIPMENTS_SLOTS
         }
 
@@ -1351,7 +1358,7 @@ class Character:
             await self.equip(_equipment_code, _equipment_slot)
 
     async def equip_for_gathering(self, _item_code: str):
-        item_infos = await get_item_infos(self.session, _item_code)
+        item_infos = self.items.get(_item_code, {})
         if item_infos.get("subtype", None) is None:
             return
 
@@ -1491,7 +1498,7 @@ class Character:
     async def get_eligible_bank_consumables(self) -> list[dict]:
         return [
             consumable_infos
-            for consumable_infos in self.all_items["cooking"]
+            for consumable_infos in get_items_list_by_craft_skill(self.items, "cooking")
             if await get_bank_item_qty(self.session, consumable_infos["code"]) > 0 and consumable_infos['level'] <= await self.get_level()
         ]
 
@@ -1719,18 +1726,22 @@ class Character:
         # Apply only on those that can be crafted again
         for item_code, item_qty in (await get_bank_items(self.session)).items():
             # No recycling for planks and ores and cooking
-            if item_code in [i['code'] for i in self.all_items['woodcutting'] + self.all_items['mining'] + self.all_items['cooking']]:
+            if item_code in [
+                i['code']
+                for skill_name in ['woodcutting', 'mining', 'cooking']
+                for i in get_items_list_by_craft_skill(self.items, skill_name)
+            ]:
                 continue
-            min_qty = await get_min_stock_qty(self.session, item_code)
+            min_qty = get_min_stock_qty(self.items[item_code])
             if item_code in [i['code'] for i in self.craftable_items] and item_qty > min_qty:
                 recycle_details[item_code] = item_qty - min_qty
         return recycle_details
 
     async def is_worth_selling(self, _item_code) -> bool:
-        item_infos = await get_item_infos(self.session, _item_code)
+        item_infos = self.items.get(_item_code, {})
         item_gold_value = item_infos["ge"]["sell_price"]
         craft_recipee = await get_craft_recipee(self.session, _item_code)
-        materials = [await get_item_infos(self.session, material) for material in craft_recipee.keys()]
+        materials = [self.items[material] for material in craft_recipee.keys()]
         if any([await is_protected_material(self.session, material["code"]) for material in materials]):
             return False
         gold_value_sorted_materials = sorted(materials, key=lambda x: x["ge"]["buy_price"], reverse=True)
@@ -1744,7 +1755,7 @@ class Character:
         if task_type == 'monsters':
             task_details = await get_monster_infos(self.session, task)
         elif task_type == 'items':
-            task_details = await get_item_infos(self.session, task)
+            task_details = self.items.get(task, {})
         else:
             raise NotImplementedError()
         return Task(
@@ -1755,10 +1766,8 @@ class Character:
         )
 
     async def get_task_type(self, item_details: dict) -> str:
-        # if item_details.get('craft') is not None:
         if item_details['code'] in [item['code'] for item in self.craftable_items]:
             return 'items'
-        # if item_details['subtype'] in ['mining', 'woodcutting', 'fishing']:
         if item_details['code'] in [item['code'] for item in self.gatherable_resources]:
             return 'resources'
         if item_details['code'] in [item['code'] for item in self.fightable_materials]:
@@ -1766,28 +1775,33 @@ class Character:
         self.logger.error(f'Unknown item {item_details}')
         return 'unknown'
 
+    async def get_best_objective(self):
+        return self.objectives[0]
+
     async def get_task(self, item_code: str = None) -> Task:
 
         if item_code is None:
-            objective = self.objectives[0]
+            objective = await self.get_best_objective()
         else:
-            objective = await get_item_infos(self.session, item_code)
+            objective = self.items[item_code]
+
         task_type = await self.get_task_type(objective)       # resources / monsters / items
+
         if task_type == 'monsters':
             target_code = await get_dropping_monster_locations(self.session, objective['code'])
         else:
             target_code = objective['code']
-        max_nb = await self.get_inventory_max_size()
+
         if task_type == 'items':
             craft_recipee = await get_craft_recipee(self.session, target_code)
             total_nb_materials = sum([qty for _, qty in craft_recipee.items()])
-            nb = max_nb // total_nb_materials
         else:
-            nb = max_nb
+            total_nb_materials = 1
+
         return Task(
             code=target_code,
             type=task_type,
-            total=nb,
+            total=(await self.get_inventory_max_size()) // total_nb_materials,
             details=objective
         )
 
@@ -1795,7 +1809,6 @@ class Character:
         gather_details, collect_details, fight_details = {}, {}, {}
 
         if self.task.type == 'items':
-            # craft_recipee = await get_craft_recipee(self.session, self.task.code)
             craft_recipee = {m['code']: m['quantity'] for m in self.task.details['craft']['items']}
         else:
             craft_recipee = {self.task.code: 1}
@@ -1936,7 +1949,7 @@ class Character:
                     code=item_code,
                     type="recycle",
                     total=recycling_qty,
-                    details=await get_item_infos(self.session, item_code)
+                    details=self.items[item_code]
                 )
 
         recycle_details = await self.get_unnecessary_equipments()
@@ -1949,7 +1962,7 @@ class Character:
                 code=item_code,
                 type="recycle",
                 total=recycling_qty,
-                details=await get_item_infos(self.session, item_code)
+                details=self.items[item_code]
             )
         return None
 
@@ -1967,26 +1980,25 @@ class Character:
 
     async def get_craft_for_equiping_task(self) -> Task:
         total_quantities = await get_all_items_quantities(self.session)
+        # Keeping only the not yet available useful equipment
+        objectives_codes = [o['code'] for o in self.objectives if o['code'] not in self.excluded_equipments]
         craftable_new_equipments = [
             i
             for i in self.craftable_items      # FIXME how is cooking handled?
-            if i['code'] in [
-                o['code']
-                for o in self.objectives
-            ] and await needs_stock(self.session, i['code'], total_quantities) and i['type'] in EQUIPMENTS_SLOTS + ['ring', 'artifact']
+            if i['code'] in objectives_codes and await needs_stock(self.session, i, total_quantities) and i['type'] in EQUIPMENTS_SLOTS + ['ring', 'artifact']
         ]
 
         if len(craftable_new_equipments) > 0:
-            self.logger.warning(f' New equipments to craft: {craftable_new_equipments}')
-            equipment_code = craftable_new_equipments[0]['code']
-            equipment_qty = await get_all_map_item_qty(self.session, equipment_code)
-            equipment_min_stock = await get_min_stock_qty(self.session, equipment_code)
-            self.logger.warning(f' Got {equipment_qty} {equipment_code} on map, need at least {equipment_min_stock}')
+            self.logger.warning(f' New equipments to craft: {[e['code'] for e in craftable_new_equipments]}')
+            equipment = craftable_new_equipments[0]
+            equipment_qty = await get_all_map_item_qty(self.session, equipment)
+            equipment_min_stock = get_min_stock_qty(equipment)
+            self.logger.warning(f' Got {equipment_qty} {equipment["code"]} on map, need at least {equipment_min_stock}')
             return Task(
-                code=equipment_code,
+                code=equipment["code"],
                 type='items',
                 total=equipment_min_stock - equipment_qty,
-                details=craftable_new_equipments[0]
+                details=equipment
             )
         return None
 
@@ -2107,33 +2119,32 @@ async def run_bot(character_object: Character):
 async def main():
     async with aiohttp.ClientSession() as session:
 
-        all_items = {
-            crafting_skill: await get_all_items(session, params={"craft_skill": crafting_skill})
-            for crafting_skill in ['weaponcrafting', 'gearcrafting', 'jewelrycrafting', 'cooking', 'woodcutting', 'mining']
+        items = {
+            item['code']: item
+            for item in await get_all_items(session)
         }
-        all_items["resources"] = await get_all_items(session, params={"type": "resource"})
 
         excluded_items = {}
 
         excluded_items['consumables'] = [
             cooked_consumable
-            for cooked_consumable in all_items['cooking']
+            for cooked_consumable in get_items_list_by_craft_skill(items, 'cooking')
             # if any(["boost" in effect["name"] for effect in cooked_consumable['effects']])
         ]
         logging.info(f'Excluded consumables: {[c["code"] for c in excluded_items["consumables"]]}')
 
-        obsolete_equipments = await get_obsolete_equipments(session)
-        all_equipments = await get_crafted_items(session)
+        obsolete_equipments = await get_obsolete_equipments(session, items)
+        all_equipments = get_crafted_items(items)
         all_equipments['excluded'] = {equipment['code']: 'excluded' for equipment in obsolete_equipments}
 
         # LOCAL_BANK = await get_bank_items(session)
 
         characters_ = [
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Kersh', max_fight_level=30, skills=['weaponcrafting', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Capu', max_fight_level=30, skills=['gearcrafting','woodcutting', 'mining']),  # 'gearcrafting',
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Brubu', max_fight_level=30, skills=['woodcutting', 'mining']),  # , 'fishing', 'mining', 'woodcutting'
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='Crabex', max_fight_level=30, skills=['jewelrycrafting', 'woodcutting', 'mining']),  # 'jewelrycrafting', 'woodcutting'
-            Character(session=session, excluded_items=excluded_items, all_items=all_items, all_equipments=all_equipments, name='JeaGa', max_fight_level=30, skills=['mining', 'woodcutting']),  # 'cooking', 'fishing'
+            Character(session=session, items=items, excluded_items=excluded_items, all_equipments=all_equipments, name='Kersh', max_fight_level=30, skills=['weaponcrafting', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
+            Character(session=session, items=items, excluded_items=excluded_items, all_equipments=all_equipments, name='Capu', max_fight_level=30, skills=['gearcrafting','woodcutting', 'mining']),  # 'gearcrafting',
+            Character(session=session, items=items, excluded_items=excluded_items, all_equipments=all_equipments, name='Brubu', max_fight_level=30, skills=['woodcutting', 'mining']),  # , 'fishing', 'mining', 'woodcutting'
+            Character(session=session, items=items, excluded_items=excluded_items, all_equipments=all_equipments, name='Crabex', max_fight_level=30, skills=['jewelrycrafting', 'woodcutting', 'mining']),  # 'jewelrycrafting', 'woodcutting'
+            Character(session=session, items=items, excluded_items=excluded_items, all_equipments=all_equipments, name='JeaGa', max_fight_level=30, skills=['mining', 'woodcutting']),  # 'cooking', 'fishing'
         ]
 
         # Initialize all characters asynchronously
