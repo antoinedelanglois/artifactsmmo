@@ -1088,6 +1088,15 @@ class Character:
         else:
             self.logger.error(f'failed to complete task.')
 
+    async def cancel_task(self):
+        url = f"{SERVER}/my/{self.name}/action/task/cancel"
+        data = await make_request(session=self.session, method='POST', url=url)
+        if data:
+            _cooldown = data["data"]["cooldown"]["total_seconds"]
+            await asyncio.sleep(_cooldown)
+        else:
+            self.logger.error(f'failed to cancel task.')
+
     async def accept_new_task(self):
         url = f"{SERVER}/my/{self.name}/action/task/new"
         data = await make_request(session=self.session, method='POST', url=url)
@@ -1643,6 +1652,16 @@ class Character:
                 await self.complete_task()
             # ask for new task
             await self.accept_new_task()
+            game_task = await self.get_game_task()
+
+        # If task is too difficult, change
+        while game_task.code in ["cultist_acolyte", "cultist_emperor", "imp"]:
+            if await self.get_inventory_quantity("tasks_coin") == 0:
+                await self.withdraw_items_from_bank({"tasks_coin": 1})
+            await self.move_to_task_master()
+            await self.cancel_task()
+            await self.accept_new_task()
+            game_task = await self.get_game_task()
 
     async def is_task_completed(self) -> bool:
 
