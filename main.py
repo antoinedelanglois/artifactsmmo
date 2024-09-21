@@ -1978,7 +1978,7 @@ class Character:
         ]
 
         if len(craftable_new_equipments) > 0:
-            self.logger.warning(f' New equipments to craft: {[e['code'] for e in craftable_new_equipments]}')
+            self.logger.warning(f' New equipments to craft: {[e["code"] for e in craftable_new_equipments]}')
             equipment = craftable_new_equipments[0]
             equipment_qty = await get_all_map_item_qty(self.session, equipment)
             equipment_min_stock = get_min_stock_qty(equipment)
