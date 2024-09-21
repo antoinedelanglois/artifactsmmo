@@ -1424,7 +1424,7 @@ class Character:
         item_level = item_details['level']
 
         # Example threshold: if item is within 10 levels of the character's skill level, it gives XP
-        return item_level >= (skill_level - 10)
+        return item_level >= (skill_level - 10) and skill_level < await get_max_level(self.session)
 
     async def does_fight_provide_xp(self, monster: dict) -> bool:
         character_level = await self.get_level()
@@ -1438,15 +1438,7 @@ class Character:
         """
         self.logger.debug(f"Selecting eligible targets for {self.name}")
 
-        # Fetch all potentially craftable items based on character's skill level
-        # craftable_items_dict = await self.get_potentially_craftable_items()
-
         # Filter items that are valid and provide XP (this includes craftable, gatherable, and fishable items)
-        # valid_craftable_items = [
-        #     item_details for item_code, item_details in craftable_items_dict.items()
-        #     if await self.is_valid_item(item_code) and await self.does_item_provide_xp(item_details) and not await is_protected_material(self.session, item_code)
-        # ]
-
         valid_craftable_items = self.gatherable_resources
 
         # Log eligible items
