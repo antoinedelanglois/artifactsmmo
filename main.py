@@ -1313,12 +1313,6 @@ class Character:
         cooldown_ = await self.move(*coords)
         await asyncio.sleep(cooldown_)
 
-    async def prepare_fighting_for_item(self, _item_code: str = None):
-        if _item_code is not None:
-            monster_location = await get_dropping_monster_locations(self.session, _item_code)
-            monster_code = monster_location['code']
-            self.logger.debug(f' item {_item_code} is dropped by {monster_code}')
-
     async def get_equipment_code(self, _equipment_slot: str):
         infos = await self.get_infos()
         return infos[f'{_equipment_slot}_slot']
@@ -1360,8 +1354,9 @@ class Character:
         if sum([qty for _, qty in fight_details.items()]) > 0:
             self.logger.debug(f'going to fight: {fight_details} ...')
             for item_code, qty in fight_details.items():
-                await self.prepare_fighting_for_item(item_code)
-                await self.equip_for_fight()
+                monster_location = await get_dropping_monster_locations(self.session, item_code)
+                monster_code = monster_location['code']
+                await self.equip_for_fight(monster_code)
                 await self.go_and_fight_to_collect(item_code, qty)
         for item_code, qty in _craft_details['gather'].items():
             await self.equip_for_gathering(item_code)
@@ -1459,16 +1454,28 @@ class Character:
         character_level = await self.get_level()
         return character_level >= equipment_infos['level']
 
-    async def equip_for_fight(self):
+    async def equip_for_fight(self, _monster_code: str = None):
+
+        if _monster_code is None:
+            monster_infos = self.task.details
+            _monster_code = self.task.code
+        else:
+            monster_infos = await get_monster_infos(self.session, _monster_code)
 
         # Identify vulnerability
-        monster_infos = await get_monster_infos(self.session, self.task.code)
         vulnerabilities = await get_monster_vulnerabilities(monster_infos=monster_infos)
-        self.logger.info(f' monster {self.task.code} vulnerabilities are {vulnerabilities}')
+        self.logger.debug(f' monster {_monster_code} vulnerabilities are {vulnerabilities}')
 
-        # Manage equipment
-        for equipment_slot in EQUIPMENTS_SLOTS:
-            await self.equip_best_equipment(equipment_slot, vulnerabilities)
+        # FIXME
+        if _monster_code == 'bandit_lizard':
+            vulnerabilities = {"water": 5}
+
+        current_equipments = await self.get_current_equipments()
+        sorted_valid_bank_equipments = await self.get_sorted_valid_bank_equipments()
+
+        selected_equipments = await select_best_equipment_set(current_equipments, sorted_valid_bank_equipments, vulnerabilities)
+        for equipment_slot, equipment_details in selected_equipments.items():
+            await self.go_and_equip(equipment_slot, equipment_details.get('code', ""))
 
         # Manage consumables
         await self.equip_best_consumables()
@@ -1832,8 +1839,9 @@ class Character:
         # TODO if inventory filled up, deposit?
         self.logger.debug(f' Current inventory occupied slots: {await self.get_inventory_occupied_slots_nb()}')
 
+        await self.equip_for_task()
+
         if self.task.type == 'monsters':
-            await self.equip_for_task()
             await self.move_to_monster(self.task.code)
             self.logger.info(f'fighting {self.task.code} ...')
             while await self.is_up_to_fight():  # Includes "task completed" check > TODO add dropped material count
@@ -1842,7 +1850,6 @@ class Character:
                 await asyncio.sleep(cooldown_)
 
         elif self.task.type == 'event':
-            await self.equip_for_task()
             await self.move(*self.task.details['location'])
             self.logger.info(f'fighting {self.task.code} ...')
             while await self.is_up_to_fight():  # Includes "task completed" check > TODO add dropped material count
@@ -1851,7 +1858,6 @@ class Character:
                 await asyncio.sleep(cooldown_)
 
         elif self.task.type == 'resources':
-            await self.equip_for_gathering(self.task.code)
             # TODO decrement task total on each target resource gathered (in inventory)
             await self.gather_material(self.task.code, self.task.total)
 
@@ -1894,26 +1900,10 @@ class Character:
 
     async def equip_for_task(self):
 
-        if self.task.type in ['monsters', 'event']:
-            # Identify vulnerability
-            monster_infos = self.task.details
-            vulnerabilities = await get_monster_vulnerabilities(monster_infos=monster_infos)
-
-            # FIXME
-            if self.task.code == 'bandit_lizard':
-                vulnerabilities = {"water": 5}
-
-            self.logger.info(f' monster {self.task.code} vulnerabilities are {vulnerabilities}')
-
-            current_equipments = await self.get_current_equipments()
-            sorted_valid_bank_equipments = await self.get_sorted_valid_bank_equipments()
-
-            selected_equipments = await select_best_equipment_set(current_equipments, sorted_valid_bank_equipments, vulnerabilities)
-            for equipment_slot, equipment_details in selected_equipments.items():
-                await self.go_and_equip(equipment_slot, equipment_details.get('code', ""))
-
-            # Manage consumables
-            await self.equip_best_consumables()
+        if self.task.type in ['monsters', 'event']:     # FIXME event is not necessarily fight
+            await self.equip_for_fight()
+        elif self.task.type == 'resources':
+            await self.equip_for_gathering(self.task.code)
 
     async def get_recycling_task(self) -> Task:
 
