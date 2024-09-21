@@ -873,7 +873,7 @@ class Character:
             {item["code"]: item for item in get_items_list_by_type(self.items, "resource")}[drop['code']]
             for monster_details in self.fightable_monsters
             for drop in monster_details['drops']
-            if drop['rate'] <= 25
+            if drop['rate'] <= 50
         ]
         self.logger.debug(f"Fightable monsters for {self.name}: {[m['code'] for m in self.fightable_monsters]}")
         self.logger.debug(f"Fightable materials for {self.name}: {[m['code'] for m in self.fightable_materials]}")
