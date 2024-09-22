@@ -286,12 +286,30 @@ async def needs_stock(session: aiohttp.ClientSession, _item: dict, total_quantit
 
 async def get_bank_items(session: aiohttp.ClientSession, params: dict = None) -> dict:
     if params is None:
-        params = {"size": 100}  # FIXME when bank inventory will be more than 100 // need to get pages
+        params = {"size": 100}
+    else:
+        params.setdefault('size', 100)
+
     url = f"{SERVER}/my/bank/items/"
-    data = await make_request(session=session, method='GET', url=url, params=params)
-    if data:
-        return {item['code']: item['quantity'] for item in data["data"]}
-    return {}
+    all_items = {}
+    page = 1
+
+    while True:
+        params['page'] = page
+        data = await make_request(session=session, method='GET', url=url, params=params)
+        if data and data["data"]:
+            for item in data["data"]:
+                code = item['code']
+                qty = item['quantity']
+                all_items[code] = all_items.get(code, 0) + qty
+            page += 1
+            # Check if we've reached the last page
+            if len(data["data"]) < params['size']:
+                break
+        else:
+            break
+
+    return all_items
 
 
 async def get_bank_item_qty(session: aiohttp.ClientSession, _item_code: str) -> int:
