@@ -527,10 +527,11 @@ async def get_monster_vulnerabilities(monster_infos: dict) -> dict[str, int]:
     else:
         resistances = [resistances[0]]      # FIXME get the lesser values
 
+    # FIXME
     if resistances == ['res_fire', 'res_water']:
         resistances = ['res_water']
 
-    logging.warning(f' Here is the resistances: {resistances}')
+    logging.debug(f' Here is the resistances: {resistances}')
 
     return {resistance.replace("res_", ""): -1 * monster_infos.get(resistance, 0) for resistance in resistances}
 
@@ -1919,9 +1920,11 @@ class Character:
 
         elif self.task.type == TaskType.RECYCLE:
             await self.withdraw_items_from_bank({self.task.code: self.task.total})
-            await self.move_to_workshop()
-            cooldown = await self.perform_recycling(self.task.details, self.task.total)
-            await asyncio.sleep(cooldown)
+            # TODO if withdraw fails, continue
+            if await self.get_inventory_quantity(self.task.code) >= self.task.total:
+                await self.move_to_workshop()
+                cooldown = await self.perform_recycling(self.task.details, self.task.total)
+                await asyncio.sleep(cooldown)
 
         elif self.task.type == TaskType.ITEMS:
             # if all available at bank -> pick it and go craft
@@ -2100,7 +2103,7 @@ async def run_bot(character_object: Character):
 
         # task_details = await character_object.prepare_for_task()   # Depending on character_object.task.type / including auto_equip
 
-        character_object.logger.warning(f" Here is the task to be executed: {character_object.task}")
+        character_object.logger.warning(f" Here is the task to be executed: {character_object.task.code} ({character_object.task.type.value})")
         await character_object.execute_task()
 
         # Reinitialize task
