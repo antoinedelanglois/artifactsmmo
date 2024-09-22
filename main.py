@@ -1312,12 +1312,9 @@ class Character:
     async def is_collectable(self, item_code: str) -> bool:
         return not (await is_protected_material(self.session, item_code))
 
-    async def move_to_workshop(self, item_code: str = None):
-        if item_code is None:
-            item_code = self.task.code
+    async def move_to_workshop(self):
         # get the skill out of item
-        item_infos = self.items[item_code]
-        skill_name = item_infos['craft']['skill']
+        skill_name = self.task.details['craft']['skill']
         coords = await self.get_nearest_coords(content_type='workshop', content_code=skill_name)
         self.logger.debug(f'{self.name} > moving to workshop at {coords}')
         cooldown_ = await self.move(*coords)
@@ -1911,7 +1908,7 @@ class Character:
             nb_items_to_craft = await self.get_nb_craftable_items(self.task.details, from_inventory=True)
 
             if nb_items_to_craft > 0:
-                await self.move_to_workshop(self.task.code)
+                await self.move_to_workshop()
                 cooldown_ = await self.perform_crafting(self.task.code, nb_items_to_craft)
                 await asyncio.sleep(cooldown_)
 
