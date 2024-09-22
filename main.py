@@ -1,5 +1,6 @@
 import aiohttp
 import asyncio
+from enum import Enum
 import logging
 from aiohttp.client_exceptions import ClientConnectorError
 from dataclasses import dataclass, field
@@ -779,17 +780,23 @@ def get_item_category(_item: dict) -> str:
     return 'UNKNOWN'
 
 
+class TaskType(Enum):
+    RESOURCES = "resources"
+    MONSTERS = "monsters"
+    ITEMS = "items"
+    RECYCLE = "recycle"     # TODO items with negative total?
+    IDLE = "idle"
+
+
 @dataclass
 class Task:
     code: str = ""
-    type: str = ""  # resources / monsters / items
+    type: TaskType = TaskType.IDLE
     total: int = 0
     details: dict = None
-
-    async def is_feasible(self, character_max_level: int) -> bool:
-        if self.type == "monsters" and self.details['level'] <= character_max_level:
-            return True
-        return False
+    x: int = 0,
+    y: int = 0,
+    is_event: bool = False
 
 
 @dataclass
@@ -827,6 +834,13 @@ class Character:
             self.set_fightable_monsters()
         )
         await self.set_objectives()
+
+    async def is_feasible_task(self, task: Task) -> bool:
+        if task.type == TaskType.MONSTERS and task.details['level'] <= self.max_fight_level:
+            return True
+        if task.type in {TaskType.ITEMS, TaskType.RESOURCES} and task.details['level'] <= self.get_skill_level(task.details['skill']):
+            return True
+        return False
 
     async def set_gatherable_resources(self):
         """
@@ -1781,7 +1795,7 @@ class Character:
     async def get_best_objective(self):
         return self.objectives[0]
 
-    async def set_task(self, item: dict, task_type: str, quantity: int):
+    async def set_task(self, item: dict, task_type: TaskType, quantity: int):
         total_nb_materials = sum([qty for _, qty in get_craft_recipee(item).items()])
         self.task = Task(
             code=item["code"],
@@ -1799,10 +1813,10 @@ class Character:
         # objective is an item > task will be crafting or gathering
         if objective["code"] in [item['code'] for item in self.gatherable_resources]:
             total_nb_materials = 1
-            task_type = "resources"
+            task_type = TaskType.RESOURCES
         else:   # Not gatherable -> Means it is craftable
             total_nb_materials = sum([qty for _, qty in get_craft_recipee(objective).items()])
-            task_type = "items"
+            task_type = TaskType.ITEMS
 
         return Task(
             code=objective["code"],
@@ -1814,7 +1828,7 @@ class Character:
     async def prepare_for_task(self) -> dict[str, dict[str, int]]:
         gather_details, collect_details, fight_details = {}, {}, {}
 
-        if self.task.type == 'items':
+        if self.task.type == TaskType.ITEMS:
             craft_recipee = {m['code']: m['quantity'] for m in self.task.details['craft']['items']}
         else:
             craft_recipee = {self.task.code: 1}
@@ -1842,7 +1856,7 @@ class Character:
             if await self.is_craftable(material):
                 # Set material as craft target
                 self.logger.info(f' Resetting task to {material}')
-                await self.set_task(self.items[material], "items", qty)
+                await self.set_task(self.items[material], TaskType.ITEMS, qty)
                 # "Dé-réserver" les articles de banque
                 return await self.prepare_for_task()
             if await self.is_gatherable(material):
@@ -1874,33 +1888,42 @@ class Character:
 
         await self.equip_for_task()
 
-        if self.task.type == 'monsters':
-            await self.move_to_monster(self.task.code)
+        if self.task.type == TaskType.MONSTERS:
+            if self.task.is_event:
+                cooldown_ = await self.move(self.task.x, self.task.y)
+                await asyncio.sleep(cooldown_)
+            else:
+                await self.move_to_monster(self.task.code)
             self.logger.info(f'fighting {self.task.code} ...')
-            while await self.is_up_to_fight():  # Includes "task completed" check > TODO add dropped material count
+            while await self.is_up_to_fight() and await self.is_event_still_on():  # Includes "task completed" check > TODO add dropped material count
                 # TODO decrement task total on each won combat
                 cooldown_ = await self.perform_fighting()
                 await asyncio.sleep(cooldown_)
 
-        elif self.task.type == 'event':
-            await self.move(*self.task.details['location'])
-            self.logger.info(f'fighting {self.task.code} ...')
-            while await self.is_up_to_fight() and await self.is_event_still_on():
-                # TODO decrement task total on each won combat
-                cooldown_ = await self.perform_fighting()
+        elif self.task.type == TaskType.RESOURCES:
+            if self.task.is_event:
+                cooldown_ = await self.move(self.task.x, self.task.y)
+                await asyncio.sleep(cooldown_)
+            else:
+                location_details = await get_dropping_resource_locations(self.session, self.task.code)
+                location_coords = await self.get_nearest_coords('resource', location_details['code'])
+
+                cooldown_ = await self.move(*location_coords)
                 await asyncio.sleep(cooldown_)
 
-        elif self.task.type == 'resources':
+            self.logger.info(f'gathering {self.task.total} {self.task.code} ...')
+            while await self.is_up_to_gather(self.task.code, self.task.total) and await self.is_event_still_on():
+                cooldown_ = await self.perform_gathering()
+                await asyncio.sleep(cooldown_)
             # TODO decrement task total on each target resource gathered (in inventory)
-            await self.gather_material(self.task.code, self.task.total)
 
-        elif self.task.type == 'recycle':
+        elif self.task.type == TaskType.RECYCLE:
             await self.withdraw_items_from_bank({self.task.code: self.task.total})
             await self.move_to_workshop()
             cooldown = await self.perform_recycling(self.task.details, self.task.total)
             await asyncio.sleep(cooldown)
 
-        elif self.task.type == 'items':
+        elif self.task.type == TaskType.ITEMS:
             # if all available at bank -> pick it and go craft
             # nb_items_to_craft = await self.get_nb_craftable_items(self.task.code, from_inventory=True)
             nb_items_to_craft = await self.get_nb_craftable_items(self.task.details)
@@ -1932,9 +1955,9 @@ class Character:
 
     async def equip_for_task(self):
 
-        if self.task.type in ['monsters', 'event']:     # FIXME event is not necessarily fight
+        if self.task.type == TaskType.MONSTERS:     # FIXME event is not necessarily fight
             await self.equip_for_fight()
-        elif self.task.type == 'resources':
+        elif self.task.type == TaskType.RESOURCES:
             await self.equip_for_gathering(self.task.code)
 
     async def get_recycling_task(self) -> Task:
@@ -1951,7 +1974,7 @@ class Character:
                 # set recycling task
                 return Task(
                     code=item_code,
-                    type="recycle",
+                    type=TaskType.RECYCLE,
                     total=recycling_qty,
                     details=self.items[item_code]
                 )
@@ -1964,7 +1987,7 @@ class Character:
             # set recycling task
             return Task(
                 code=item_code,
-                type="recycle",
+                type=TaskType.RECYCLE,
                 total=recycling_qty,
                 details=self.items[item_code]
             )
@@ -1976,7 +1999,7 @@ class Character:
             highest_fightable_monster = self.fight_objectives[0]
             return Task(
                 code=highest_fightable_monster['code'],
-                type='monsters',
+                type=TaskType.MONSTERS,
                 total=99,   # FIXME when does it stop?
                 details=highest_fightable_monster
             )
@@ -2000,7 +2023,7 @@ class Character:
             self.logger.warning(f' Got {equipment_qty} {equipment["code"]} on map, need at least {equipment_min_stock}')
             return Task(
                 code=equipment["code"],
-                type='items',
+                type=TaskType.ITEMS,
                 total=equipment_min_stock - equipment_qty,
                 details=equipment
             )
@@ -2015,10 +2038,27 @@ class Character:
                 monster_details['location'] = (event["map"]["x"], event["map"]["y"])
                 return Task(
                     code=monster_code,
-                    type="event",
+                    type=TaskType.MONSTERS,
                     total=99,   # FIXME when does it stop?
-                    details=monster_details
+                    details=monster_details,
+                    x=event["map"]["x"],
+                    y=event["map"]["y"],
+                    is_event=True
                 )
+            if event["name"] in ["Strange Apparition"]:
+                resource_code = event["map"]["content"]["code"]
+                resource_details = await get_resource_infos(self.session, resource_code)
+                if await self.get_skill_level(resource_details["skill"]) >= resource_details["level"]:
+                    resource_details['location'] = (event["map"]["x"], event["map"]["y"])
+                    return Task(
+                        code=resource_code,
+                        type=TaskType.RESOURCES,
+                        total=99,   # FIXME when does it stop?
+                        details=resource_details,
+                        x=event["map"]["x"],
+                        y=event["map"]["y"],
+                        is_event=True
+                    )
         return None
 
 
@@ -2044,7 +2084,7 @@ async def run_bot(character_object: Character):
         if event_task is not None:
             character_object.task = event_task
         # No need to do game tasks if already a lot of task coins
-        elif await game_task.is_feasible(character_object.max_fight_level) and await get_bank_item_qty(character_object.session, "tasks_coin") < 70:
+        elif await character_object.is_feasible_task(game_task) and await get_bank_item_qty(character_object.session, "tasks_coin") < 70:
             character_object.task = game_task
         elif recycling_task is not None:
             character_object.task = recycling_task
@@ -2053,7 +2093,7 @@ async def run_bot(character_object: Character):
             character_object.task = craft_for_equiping_task
         elif fight_for_leveling_up_task is not None and await character_object.got_enough_consumables(-1):
             character_object.task = fight_for_leveling_up_task
-        elif character_object.task.type == "":
+        elif character_object.task.type == TaskType.IDLE:
             # find and assign a valid task
             character_object.task = await character_object.get_task()     # From a list?
         ### SET TASK END ###
