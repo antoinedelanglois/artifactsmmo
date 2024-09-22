@@ -681,7 +681,7 @@ async def select_best_equipment(equipment1_infos: dict, sorted_valid_equipments:
 
     :param equipment1_infos: The currently equipped item information (or empty dict if none equipped).
     :param sorted_valid_equipments: A list of valid equipment items sorted by level.
-    :param vulnerability: The monster's elemental vulnerability (e.g., 'fire', 'water').
+    :param vulnerabilities: The monster's elemental vulnerabilities (e.g., 'fire', 'water').
     :return: The selected best equipment.
     """
     if len(sorted_valid_equipments) == 0:
