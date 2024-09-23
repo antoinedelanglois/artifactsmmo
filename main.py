@@ -1912,13 +1912,18 @@ class Character:
             if self.task.is_event:
                 cooldown_ = await self.move(self.task.x, self.task.y)
                 await asyncio.sleep(cooldown_)
+                self.logger.info(f'fighting {self.task.code} ...')
+                while await self.is_up_to_fight() and await self.is_event_still_on():  # Includes "task completed" check > TODO add dropped material count
+                    # TODO decrement task total on each won combat
+                    cooldown_ = await self.perform_fighting()
+                    await asyncio.sleep(cooldown_)
             else:
                 await self.move_to_monster(self.task.code)
-            self.logger.info(f'fighting {self.task.code} ...')
-            while await self.is_up_to_fight() and await self.is_event_still_on():  # Includes "task completed" check > TODO add dropped material count
-                # TODO decrement task total on each won combat
-                cooldown_ = await self.perform_fighting()
-                await asyncio.sleep(cooldown_)
+                self.logger.info(f'fighting {self.task.code} ...')
+                while await self.is_up_to_fight():  # Includes "task completed" check > TODO add dropped material count
+                    # TODO decrement task total on each won combat
+                    cooldown_ = await self.perform_fighting()
+                    await asyncio.sleep(cooldown_)
 
         elif self.task.type == TaskType.RESOURCES:
             if self.task.is_event:
