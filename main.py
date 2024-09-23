@@ -1168,6 +1168,15 @@ class Character:
         else:
             self.logger.error(f'failed to get new task.')
 
+    async def exchange_tasks_coins(self):
+        url = f"{SERVER}/my/{self.name}/action/task/exchange"
+        data = await make_request(session=self.session, method='POST', url=url)
+        if data:
+            _cooldown = data["data"]["cooldown"]["total_seconds"]
+            await asyncio.sleep(_cooldown)
+        else:
+            self.logger.error(f'failed to get new task.')
+
     async def move(self, x, y) -> int:
         current_location = await self.get_current_location()
         if current_location == (x, y):
@@ -1725,6 +1734,16 @@ class Character:
     async def manage_task(self):
         game_task = await self.get_game_task()
         # if task completed (or none assigned yet), go to get rewards and renew task
+
+        nb_tasks_coins = await get_bank_item_qty(self.session, "tasks_coin")
+        nb_tasks_coins_lots = (nb_tasks_coins - 30)//3
+        if nb_tasks_coins_lots > 0:
+            await self.withdraw_items_from_bank({"tasks_coin": nb_tasks_coins_lots * 3})
+            await self.move_to_task_master()
+
+            for _ in range(nb_tasks_coins_lots):
+                await self.exchange_tasks_coins()
+
         if await self.is_task_completed():
             # go to task master
             await self.move_to_task_master()
@@ -1778,11 +1797,11 @@ class Character:
     async def get_game_task(self) -> Task:
         infos = await self.get_infos()
         task = infos["task"]
-        task_type = infos["task_type"]
+        task_type = TaskType(infos["task_type"])
         task_total = infos["task_total"]-infos["task_progress"]
-        if task_type == 'monsters':
+        if task_type == TaskType.MONSTERS:
             task_details = await get_monster_infos(self.session, task)
-        elif task_type == 'items':
+        elif task_type == TaskType.ITEMS:
             task_details = self.items.get(task, {})
         else:
             raise NotImplementedError()
@@ -2087,7 +2106,7 @@ async def run_bot(character_object: Character):
         if event_task is not None:
             character_object.task = event_task
         # No need to do game tasks if already a lot of task coins
-        elif await character_object.is_feasible_task(game_task) and await get_bank_item_qty(character_object.session, "tasks_coin") < 70:
+        elif await character_object.is_feasible_task(game_task) and (await get_bank_item_qty(character_object.session, "tasks_coin") < 70):
             character_object.task = game_task
         elif recycling_task is not None:
             character_object.task = recycling_task
