@@ -801,10 +801,46 @@ class Task:
 
 
 @dataclass
+class Environment:
+    items: dict[str, dict]
+    monsters: list[dict]
+    # TODO dropped_items / monsters
+
+    def __post_init__(self):
+        self.logger = logging.getLogger('environment')
+        self.crafted_items = self.get_crafted_items()
+        self.equipments = self.get_equipments()
+        self.consumables = self.get_consumables()
+
+    def get_crafted_items(self) -> list[dict]:
+        return [
+            item
+            for _, item in self.items.items()
+            if item.get("craft") is not None
+        ]
+
+    def get_equipments(self) -> dict[str, dict]:
+        return {
+            skill_name: {
+                equipment["code"]: equipment
+                for equipment in self.crafted_items
+                if equipment["craft"]["skill"] == skill_name
+            }
+            for skill_name in ['weaponcrafting', 'gearcrafting', 'jewelrycrafting']
+        }
+
+    def get_consumables(self) -> list[dict]:
+        return [
+            equipment
+            for equipment in self.crafted_items
+            if equipment["craft"]["skill"] == 'cooking'
+        ]
+
+@dataclass
 class Character:
     session: aiohttp.ClientSession
+    environment: Environment
     all_equipments: dict[str, dict]     # TODO get it to dataclass
-    items: dict[str, dict]
     excluded_items: dict[str, list[dict]]
     name: str
     skills: list[str]
@@ -858,7 +894,7 @@ class Character:
             }
             gatherable_resources_spots.extend(await get_all_resources(self.session, params=params))
 
-        resources_dict = {item["code"]: item for item in get_items_list_by_type(self.items, "resource")}
+        resources_dict = {item["code"]: item for item in get_items_list_by_type(self.environment.items, "resource")}
 
         self.gatherable_resources = [
             resources_dict[dropped_material['code']]
@@ -879,7 +915,7 @@ class Character:
             if crafting_skill == 'fishing':
                 crafting_skill = 'cooking'
             skill_level = infos[f'{crafting_skill}_level']
-            skill_craftable_items = [item for item in get_items_list_by_craft_skill(self.items, crafting_skill) if item['level'] <= skill_level]
+            skill_craftable_items = [item for item in get_items_list_by_craft_skill(self.environment.items, crafting_skill) if item['level'] <= skill_level]
             self.logger.debug(f' crafting_skill: {crafting_skill} > {[i["code"] for i in skill_craftable_items]}')
             craftable_items.extend(skill_craftable_items[::-1])
         # TODO exclude protected items (such as the one using jasper_crystal)
@@ -901,9 +937,11 @@ class Character:
             "max_level": self.max_fight_level,
             # "min_level": max(0, self.max_fight_level - 10)
         }
-        self.fightable_monsters = await get_all_monsters(self.session, params=params)
+        fightable_monsters = await get_all_monsters(self.session, params=params)
+        # TODO make it dynamic based on real fight capacity
+        self.fightable_monsters = [m for m in fightable_monsters if m['code'] not in  ['lich']]
         self.fightable_materials = [
-            {item["code"]: item for item in get_items_list_by_type(self.items, "resource")}[drop['code']]
+            {item["code"]: item for item in get_items_list_by_type(self.environment.items, "resource")}[drop['code']]
             for monster_details in self.fightable_monsters
             for drop in monster_details['drops']
             if drop['rate'] <= 50
@@ -923,7 +961,7 @@ class Character:
             return item["code"] in [i['code'] for i in self.fightable_materials]
         elif item_category == 'craftable_resource':
             return all([
-                await self.can_be_home_made(self.items[material_code])
+                await self.can_be_home_made(self.environment.items[material_code])
                 for material_code in list(get_craft_recipee(item).keys())
             ])
         elif item_category == 'given_resource':
@@ -1382,7 +1420,7 @@ class Character:
     async def get_current_equipments(self) -> dict[str, dict]:
         infos = await self.get_infos()
         return {
-            equipment_slot: self.items[infos[f'{equipment_slot}_slot']] if infos[f'{equipment_slot}_slot'] != "" else {}
+            equipment_slot: self.environment.items[infos[f'{equipment_slot}_slot']] if infos[f'{equipment_slot}_slot'] != "" else {}
             for equipment_slot in EQUIPMENTS_SLOTS
         }
 
@@ -1397,7 +1435,7 @@ class Character:
             await self.equip(_equipment_code, _equipment_slot)
 
     async def equip_for_gathering(self, _item_code: str):
-        item_infos = self.items.get(_item_code, {})
+        item_infos = self.environment.items.get(_item_code, {})
         if item_infos.get("subtype", None) is None:
             return
 
@@ -1546,7 +1584,7 @@ class Character:
     async def get_eligible_bank_consumables(self) -> list[dict]:
         return [
             consumable_infos
-            for consumable_infos in get_items_list_by_craft_skill(self.items, "cooking")
+            for consumable_infos in self.environment.consumables
             if await get_bank_item_qty(self.session, consumable_infos["code"]) > 0 and consumable_infos['level'] <= await self.get_level()
         ]
 
@@ -1745,7 +1783,7 @@ class Character:
         # if task completed (or none assigned yet), go to get rewards and renew task
 
         nb_tasks_coins = await get_bank_item_qty(self.session, "tasks_coin")
-        nb_tasks_coins_lots = (nb_tasks_coins - 30)//3
+        nb_tasks_coins_lots = (nb_tasks_coins - 100)//6
         if nb_tasks_coins_lots > 0:
             await self.withdraw_items_from_bank({"tasks_coin": nb_tasks_coins_lots * 3})
             await self.move_to_task_master()
@@ -1764,7 +1802,7 @@ class Character:
             game_task = await self.get_game_task()
 
         # If task is too difficult, change
-        while game_task.code in ["cultist_acolyte", "cultist_emperor", "imp"]:
+        while game_task.code in ["cultist_acolyte", "cultist_emperor", "lich"]:
             if await self.get_inventory_quantity("tasks_coin") == 0:
                 await self.withdraw_items_from_bank({"tasks_coin": 1})
             await self.move_to_task_master()
@@ -1787,17 +1825,17 @@ class Character:
             if item_code in [
                 i['code']
                 for skill_name in ['woodcutting', 'mining', 'cooking']
-                for i in get_items_list_by_craft_skill(self.items, skill_name)
+                for i in get_items_list_by_craft_skill(self.environment.items, skill_name)
             ]:
                 continue
-            min_qty = get_min_stock_qty(self.items[item_code])
+            min_qty = get_min_stock_qty(self.environment.items[item_code])
             if item_code in [i['code'] for i in self.craftable_items] and item_qty > min_qty:
                 recycle_details[item_code] = item_qty - min_qty
         return recycle_details
 
     async def is_worth_selling(self, _item: dict) -> bool:
         item_gold_value = _item["ge"]["sell_price"]     # FIXME this could be moving // need to be up to date
-        materials = [self.items[material] for material in get_craft_recipee(_item).keys()]
+        materials = [self.environment.items[material] for material in get_craft_recipee(_item).keys()]
         if any([await is_protected_material(self.session, material["code"]) for material in materials]):
             return False
         gold_value_sorted_materials = sorted(materials, key=lambda x: x["ge"]["buy_price"], reverse=True)
@@ -1811,7 +1849,7 @@ class Character:
         if task_type == TaskType.MONSTERS:
             task_details = await get_monster_infos(self.session, task)
         elif task_type == TaskType.ITEMS:
-            task_details = self.items.get(task, {})
+            task_details = self.environment.items.get(task, {})
         else:
             raise NotImplementedError()
         return Task(
@@ -1885,7 +1923,7 @@ class Character:
             if await self.is_craftable(material):
                 # Set material as craft target
                 self.logger.info(f' Resetting task to {material}')
-                await self.set_task(self.items[material], TaskType.ITEMS, qty)
+                await self.set_task(self.environment.items[material], TaskType.ITEMS, qty)
                 # "Dé-réserver" les articles de banque
                 return await self.prepare_for_task()
             if await self.is_gatherable(material):
@@ -2012,7 +2050,7 @@ class Character:
                     code=item_code,
                     type=TaskType.RECYCLE,
                     total=recycling_qty,
-                    details=self.items[item_code]
+                    details=self.environment.items[item_code]
                 )
 
         recycle_details = await self.get_unnecessary_equipments()
@@ -2025,7 +2063,7 @@ class Character:
                 code=item_code,
                 type=TaskType.RECYCLE,
                 total=recycling_qty,
-                details=self.items[item_code]
+                details=self.environment.items[item_code]
             )
         return None
 
@@ -2120,7 +2158,7 @@ async def run_bot(character_object: Character):
         if event_task is not None:
             character_object.task = event_task
         # No need to do game tasks if already a lot of task coins
-        elif await character_object.is_feasible_task(game_task) and (await get_bank_item_qty(character_object.session, "tasks_coin") < 70):
+        elif await character_object.is_feasible_task(game_task) and (await get_bank_item_qty(character_object.session, "tasks_coin") < 150):
             character_object.task = game_task
         elif recycling_task is not None:
             character_object.task = recycling_task
@@ -2219,12 +2257,20 @@ async def main():
 
         # LOCAL_BANK = await get_bank_items(session)
 
+        # Lich 96% > cursed_specter, gold_shield, cursed_hat, malefic_armor, piggy_pants, gold_boots, ruby_ring, ruby_ring, ruby_amulet
+        # Lich 100% > cursed_specter, gold_shield, cursed_hat, malefic_armor, piggy_pants, gold_boots, ruby_ring, ruby_ring, magic_stone_amulet
+
+        environment = Environment(
+            items=items,
+            monsters=await get_all_monsters(session)
+        )
+
         characters_ = [
-            Character(session=session, items=items, excluded_items=excluded_items, all_equipments=all_equipments, name='Kersh', max_fight_level=30, skills=['weaponcrafting', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
-            Character(session=session, items=items, excluded_items=excluded_items, all_equipments=all_equipments, name='Capu', max_fight_level=30, skills=['gearcrafting','woodcutting', 'mining']),  # 'gearcrafting',
-            Character(session=session, items=items, excluded_items=excluded_items, all_equipments=all_equipments, name='Brubu', max_fight_level=30, skills=['woodcutting', 'mining']),  # , 'fishing', 'mining', 'woodcutting'
-            Character(session=session, items=items, excluded_items=excluded_items, all_equipments=all_equipments, name='Crabex', max_fight_level=30, skills=['jewelrycrafting', 'woodcutting', 'mining']),  # 'jewelrycrafting', 'woodcutting'
-            Character(session=session, items=items, excluded_items=excluded_items, all_equipments=all_equipments, name='JeaGa', max_fight_level=30, skills=['mining', 'woodcutting']),  # 'cooking', 'fishing'
+            Character(session=session, environment=environment, excluded_items=excluded_items, all_equipments=all_equipments, name='Kersh', max_fight_level=30, skills=['weaponcrafting', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
+            Character(session=session, environment=environment, excluded_items=excluded_items, all_equipments=all_equipments, name='Capu', max_fight_level=30, skills=['gearcrafting','woodcutting', 'mining']),  # 'gearcrafting',
+            Character(session=session, environment=environment, excluded_items=excluded_items, all_equipments=all_equipments, name='Brubu', max_fight_level=30, skills=['woodcutting', 'mining']),  # , 'fishing', 'mining', 'woodcutting'
+            Character(session=session, environment=environment, excluded_items=excluded_items, all_equipments=all_equipments, name='Crabex', max_fight_level=30, skills=['jewelrycrafting', 'woodcutting', 'mining']),  # 'jewelrycrafting', 'woodcutting'
+            Character(session=session, environment=environment, excluded_items=excluded_items, all_equipments=all_equipments, name='JeaGa', max_fight_level=30, skills=['mining', 'woodcutting']),  # 'cooking', 'fishing'
         ]
 
         # Initialize all characters asynchronously
