@@ -1805,9 +1805,9 @@ class Character:
 
     async def get_game_task(self) -> Task:
         infos = await self.get_infos()
-        task = infos["task"]
-        task_type = TaskType(infos["task_type"])
-        task_total = infos["task_total"]-infos["task_progress"]
+        task = infos.get("task", "")
+        task_type = TaskType(infos.get("task_type", ""))
+        task_total = infos.get("task_total", 0) - infos.get("task_progress", 0)
         if task_type == TaskType.MONSTERS:
             task_details = await get_monster_infos(self.session, task)
         elif task_type == TaskType.ITEMS:
