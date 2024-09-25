@@ -1404,11 +1404,20 @@ class Character:
         # TODO check available equipements with "effects" > "name" == "gathering_skill"
 
         if item_infos["subtype"] == "mining":
-            await self.go_and_equip("weapon", "iron_pickaxe")
+            pick_tool = "iron_pickaxe"
+            if await get_bank_item_qty(self.session, "gold_pickaxe") >= 1:
+                pick_tool = "gold_pickaxe"
+            await self.go_and_equip("weapon", pick_tool)
         elif item_infos["subtype"] == "woodcutting":
-            await self.go_and_equip("weapon", "iron_axe")
+            axe_tool = "iron_axe"
+            if await get_bank_item_qty(self.session, "gold_axe") >= 1:
+                axe_tool = "gold_axe"
+            await self.go_and_equip("weapon", axe_tool)
         elif item_infos["subtype"] == "fishing":
-            await self.go_and_equip("weapon", "spruce_fishing_rod")
+            fish_tool = "spruce_fishing_rod"
+            if await get_bank_item_qty(self.session, "gold_fishing_rod") >= 1:
+                fish_tool = "gold_fishing_rod"
+            await self.go_and_equip("weapon", fish_tool)
         return
 
     async def gather_and_collect(self, _craft_details: dict[str, dict[str, int]]):
