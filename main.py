@@ -2025,6 +2025,11 @@ class Character:
             if self.task.is_event:
                 cooldown_ = await self.move(self.task.x, self.task.y)
                 await asyncio.sleep(cooldown_)
+
+                self.logger.info(f'gathering {self.task.total} {self.task.code} ...')
+                while await self.is_up_to_gather(self.task.code, self.task.total) and await self.is_event_still_on():
+                    cooldown_ = await self.perform_gathering()
+                    await asyncio.sleep(cooldown_)
             else:
                 location_details = self.environment.get_item_dropping_location(self.task.code)
                 location_coords = await self.get_nearest_coords('resource', location_details['code'])
@@ -2032,10 +2037,10 @@ class Character:
                 cooldown_ = await self.move(*location_coords)
                 await asyncio.sleep(cooldown_)
 
-            self.logger.info(f'gathering {self.task.total} {self.task.code} ...')
-            while await self.is_up_to_gather(self.task.code, self.task.total) and await self.is_event_still_on():
-                cooldown_ = await self.perform_gathering()
-                await asyncio.sleep(cooldown_)
+                self.logger.info(f'gathering {self.task.total} {self.task.code} ...')
+                while await self.is_up_to_gather(self.task.code, self.task.total):
+                    cooldown_ = await self.perform_gathering()
+                    await asyncio.sleep(cooldown_)
             # TODO decrement task total on each target resource gathered (in inventory)
 
         elif self.task.type == TaskType.RECYCLE:
