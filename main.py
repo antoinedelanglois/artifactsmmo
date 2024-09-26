@@ -784,6 +784,7 @@ class Environment:
             for consumable in self.consumables
             # if any(["boost" in effect["name"] for effect in cooked_consumable['effects']])
         ]
+        self.logger.info(f'Protected consumables: {protected_consumable}')
         return consumable["code"] in protected_consumable
 
     @staticmethod       # TODO have an Item class
@@ -792,11 +793,14 @@ class Environment:
 
     @staticmethod
     def is_item_an_equipment(item: dict) -> bool:
-        return item.get("craft", {}).get("skill", "") in ['weaponcrafting', 'gearcrafting', 'jewelrycrafting']
+        return item["type"] in EQUIPMENTS_TYPES
 
     @staticmethod
     def is_item_a_consumable(item: dict) -> bool:
-        return item.get("craft", {}).get("skill", "") in ['cooking']
+        craft = item["craft"]
+        if craft is None:
+            return False
+        return craft["skill"] in ['cooking']
 
     @staticmethod
     def is_item_gatherable(item: dict) -> bool:
@@ -804,25 +808,15 @@ class Environment:
 
     @staticmethod
     def is_item_crafted(item: dict) -> bool:
-        return item.get("craft") is not None
+        return item["craft"] is not None
+
+    @staticmethod
+    def is_item_dropped_equipment(item: dict) -> bool:
+        return Environment.is_item_an_equipment(item) and not Environment.is_item_crafted(item)
 
     @staticmethod
     def is_item_given(item: dict) -> bool:
-        dropped_equipments = ['wooden_stick', 'bandit_armor', 'death_knight_sword', 'lich_crown', 'life_crystal']
-        # TODO both is equipment but not crafted
-        return item["code"] in dropped_equipments or item["subtype"] in ["task"] or item["type"] in ["currency"]
-
-    def get_item_category(self, _item: dict) -> str:
-        if self.is_item_gatherable(_item):
-            return 'gathered_resource'
-        if self.is_item_dropped(_item):
-            return 'dropped_resource'
-        if self.is_item_crafted(_item):
-            return 'craftable_resource'
-        # 'jasper_crystal' is resource > task // 'lich_crown' is helmet > ""
-        if self.is_item_given(_item):
-            return 'given_resource'
-        return 'UNKNOWN'
+        return Environment.is_item_dropped_equipment(item) or item["subtype"] in ["task"] or item["type"] in ["currency"]
 
     def get_item_dropping_monsters(self, item_code: str) -> list[tuple[dict, int]]:
         item_dropping_monsters = []
@@ -830,7 +824,7 @@ class Environment:
             for item_details in monster["drops"]:
                 if item_details["code"] == item_code:
                     item_dropping_monsters.append((monster, item_details["rate"]))
-        item_dropping_monsters = sorted(item_dropping_monsters, key=lambda x: x["rate"], reverse=False)
+        item_dropping_monsters = sorted(item_dropping_monsters, key=lambda x: x[1], reverse=False)
         return item_dropping_monsters
 
     def get_item_dropping_monster(self, item_code: str) -> dict:
@@ -846,7 +840,7 @@ class Environment:
             for item_details in resource_location["drops"]:
                 if item_details["code"] == item_code:
                     item_dropping_locations.append((resource_location, item_details["rate"]))
-        item_dropping_locations = sorted(item_dropping_locations, key=lambda x: x["rate"], reverse=False)
+        item_dropping_locations = sorted(item_dropping_locations, key=lambda x: x[1], reverse=False)
         return item_dropping_locations
 
     def get_item_dropping_location(self, item_code: str) -> dict:
@@ -855,6 +849,13 @@ class Environment:
             return item_dropping_locations[0][0]
         self.logger.error(f" Unknown dropped item {item_code}")
         return {}
+
+    def get_item_dropping_max_rate(self, item_code: str) -> int:
+        item_dropping_locations = self.get_item_dropping_locations(item_code)
+        if len(item_dropping_locations) > 0:
+            return item_dropping_locations[0][1]
+        self.logger.error(f" Unknown dropped item {item_code}")
+        return 9999
 
     def get_dropped_items(self) -> list[dict]:
         return [
@@ -934,26 +935,36 @@ class Character:
         Fetch and set gatherable resources based on the character's collect skill and level
         """
         infos = await self.get_infos()
-        gatherable_resources_spots = []
-        for collecting_skill in ['mining', 'woodcutting', 'fishing']:
-            skill_level = infos[f'{collecting_skill}_level']
-            params = {
-                "skill": collecting_skill,  # Mining, woodcutting, fishing, etc.
-                "max_level": skill_level,    # Limit to resources the character can gather
-                # "min_level": max(1, skill_level - 10)
-            }
-            gatherable_resources_spots.extend((await get_all_resources(self.session, params=params)).values())
 
-        resources_dict = {item["code"]: item for item in get_items_list_by_type(self.environment.items, "resource")}
+        gatherable_resources = []
 
-        self.gatherable_resources = [
-            resources_dict[dropped_material['code']]
-            for gatherable_resources_spot in gatherable_resources_spots
-            for dropped_material in gatherable_resources_spot['drops']
-            if (not self.environment.is_item_protected(dropped_material)) and dropped_material['rate'] <= 100   # Exclude protected material
-            # TODO exclude materials with a low rate of drop
-        ]
+        for item_code, item in self.environment.items.items():
+            if self.environment.is_item_gatherable(item) and item["level"] <= infos[f'{item["subtype"]}_level']:
+                if self.environment.get_item_dropping_max_rate(item_code) <= 100:
+                    gatherable_resources.append(item)
+
+        self.gatherable_resources = gatherable_resources
         self.logger.info(f"Gatherable resources for {self.name}: {[r['code'] for r in self.gatherable_resources]}")
+
+        # gatherable_resources_spots = []
+        # for collecting_skill in ['mining', 'woodcutting', 'fishing']:
+        #     skill_level = infos[f'{collecting_skill}_level']
+        #     resource_locations = [
+        #         resource_location
+        #         for resource_location in self.environment.resource_locations.values()
+        #         if resource_location["skill"] == collecting_skill and resource_location["level"] <= skill_level
+        #     ]
+        #
+        #     gatherable_resources_spots.extend(resource_locations)
+        #
+        # self.gatherable_resources = [
+        #     self.environment.items[dropped_material['code']]
+        #     for gatherable_resources_spot in gatherable_resources_spots
+        #     for dropped_material in gatherable_resources_spot['drops']
+        #     if (not self.environment.is_item_protected(dropped_material)) and dropped_material['rate'] <= 100   # Exclude protected material
+        #     # TODO exclude materials with a low rate of drop
+        # ]
+        # self.logger.info(f"Gatherable resources for {self.name}: {[r['code'] for r in self.gatherable_resources]}")
 
     async def set_craftable_items(self):
         """
@@ -961,6 +972,11 @@ class Character:
         """
         infos = await self.get_infos()
         craftable_items = []
+
+        # for item in self.environment.crafted_items:
+        #     if item["level"] <= infos[f'{item["skill"]}_level']:
+        #         craftable_items.append(item)
+
         for crafting_skill in self.skills:
             if crafting_skill == 'fishing':
                 crafting_skill = 'cooking'
@@ -998,11 +1014,6 @@ class Character:
         self.logger.debug(f"Fightable materials for {self.name}: {[m['code'] for m in self.fightable_materials]}")
 
     async def can_be_home_made(self, item: dict) -> bool:
-        # if item out of resource: is it gatherable
-        # if item out of mob/drop: is it fightable
-        # if craftable item: can all material be home made?
-        item_category = self.environment.get_item_category(item)
-        self.logger.debug(f' Checking if {item["code"]} can be home made from its category {item_category}')
         if self.environment.is_item_gatherable(item):
             return item["code"] in [i['code'] for i in self.gatherable_resources]
         elif self.environment.is_item_dropped(item):
@@ -1012,7 +1023,7 @@ class Character:
                 await self.can_be_home_made(self.environment.items[material_code])
                 for material_code in list(get_craft_recipee(item).keys())
             ])
-        elif item_category == 'given_resource':
+        elif self.environment.is_item_given(item):
             return False
         else:
             self.logger.warning(f' {item["code"]} to categorize')
@@ -1600,12 +1611,11 @@ class Character:
 
     async def equip_for_fight(self, _monster: dict = None):
 
-        _monster_code = _monster["code"]
-
-        if _monster_code is None:
-            monster_infos = self.task.details
+        if _monster is None:
             _monster_code = self.task.code
+            monster_infos = self.task.details
         else:
+            _monster_code = _monster["code"]
             monster_infos = _monster
 
         # Identify vulnerability
@@ -1649,7 +1659,7 @@ class Character:
 
         valid_consumables = [
             consumable for consumable in valid_consumables
-            if not self.environment.is_consumable_protected(consumable['code'])
+            if not self.environment.is_consumable_protected(consumable)
         ]
 
         self.logger.debug(f' eligible consumables are {valid_consumables}')
@@ -1861,14 +1871,11 @@ class Character:
         # Apply only on those that can be crafted again
         for item_code, item_qty in (await get_bank_items(self.session)).items():
             # No recycling for planks and ores and cooking
-            if item_code in [
-                i['code']
-                for skill_name in ['woodcutting', 'mining', 'cooking']
-                for i in get_items_list_by_craft_skill(self.environment.items, skill_name)
-            ]:
+            item = self.environment.items[item_code]
+            if item["craft"] and item["craft"]["skill"] in ['woodcutting', 'mining', 'cooking']:
                 continue
-            min_qty = get_min_stock_qty(self.environment.items[item_code])
-            if item_code in [i['code'] for i in self.craftable_items] and item_qty > min_qty:
+            min_qty = get_min_stock_qty(item)
+            if self.environment.is_item_crafted(item) and item_qty > min_qty:
                 recycle_details[item_code] = item_qty - min_qty
         return recycle_details
 
@@ -1883,7 +1890,7 @@ class Character:
     async def get_game_task(self) -> Task:
         infos = await self.get_infos()
         task = infos.get("task", "")
-        task_type = TaskType(infos.get("task_type", ""))
+        task_type = TaskType(infos.get("task_type", "idle"))
         task_total = infos.get("task_total", 0) - infos.get("task_progress", 0)
         if task_type == TaskType.MONSTERS:
             task_details = self.environment.monsters[task]
@@ -2282,15 +2289,6 @@ async def main():
             for item in await get_all_items(session)
         }
 
-        excluded_items = {}
-
-        excluded_items['consumables'] = [
-            cooked_consumable
-            for cooked_consumable in get_items_list_by_craft_skill(items, 'cooking')
-            # if any(["boost" in effect["name"] for effect in cooked_consumable['effects']])
-        ]
-        logging.info(f'Excluded consumables: {[c["code"] for c in excluded_items["consumables"]]}')
-
         obsolete_equipments = await get_obsolete_equipments(session, items)
         all_equipments = get_crafted_items(items)
         all_equipments['excluded'] = {equipment['code']: 'excluded' for equipment in obsolete_equipments}
@@ -2310,10 +2308,10 @@ async def main():
         # Test filter
         given_items = [
             item
-            for item in items
-            if environment.is_item_an_equipment(item) and not environment.is_item_crafted(item)
+            for item in items.values()
+            if environment.is_item_given(item)
         ]
-        logging.warning(f"Equipments that can only be given or dropped: {given_items}")
+        logging.warning(f"Equipments that can only be given or dropped: {list(map(lambda x: x['code'], given_items))}")
 
         characters_ = [
             Character(session=session, environment=environment, all_equipments=all_equipments, name='Kersh', max_fight_level=30, skills=['weaponcrafting', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
