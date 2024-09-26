@@ -216,13 +216,16 @@ def identify_obsolete_equipments(equipment_groups: dict[str, list[dict]]) -> lis
 async def get_obsolete_equipments(session: aiohttp.ClientSession, _items: dict[str, dict]) -> list[dict]:
     equipment_groups = get_equipments_by_type(_items)
 
-    # Filter the existing equipments on map
+    # Récupérer les quantités des items une seule fois
+    total_quantities = await get_all_items_quantities(session)
+
+    # Filtrer les équipements existants sur la carte
     map_equipments = {}
     for equipment_type, equipments in equipment_groups.items():
         filtered_equipments = []
         for equipment in equipments:
-            # Only if minimum quantity available
-            if await get_all_map_item_qty(session, equipment) >= get_min_stock_qty(equipment):
+            # Seulement si la quantité minimale est disponible
+            if total_quantities.get(equipment['code'], 0) >= get_min_stock_qty(equipment):
                 filtered_equipments.append(equipment)
         map_equipments[equipment_type] = filtered_equipments
 
@@ -784,8 +787,8 @@ class Environment:
             for consumable in self.consumables
             # if any(["boost" in effect["name"] for effect in cooked_consumable['effects']])
         ]
-        self.logger.info(f'Protected consumables: {protected_consumable}')
-        return consumable["code"] in protected_consumable
+        self.logger.debug(f'Protected consumables: {[c["code"] for c in protected_consumable]}')
+        return consumable["code"] in [c["code"] for c in protected_consumable]
 
     @staticmethod       # TODO have an Item class
     def is_item_dropped(item: dict) -> bool:
@@ -1740,7 +1743,7 @@ class Character:
         character_infos = await self.get_infos()
         currently_equipped_consumables = [character_infos['consumable1_slot'], character_infos['consumable2_slot']]
         self.logger.debug(f' Currently equipped consumables: {currently_equipped_consumables}')
-        return [self.environment.equipments[c] if c else None for c in currently_equipped_consumables]
+        return [self.environment.consumables[c] if c else None for c in currently_equipped_consumables]
 
     async def equip_best_equipment(self, _equipment_slot: str, vulnerabilities: dict[str, int]):
         available_equipments = await self.get_bank_equipments_for_slot(_equipment_slot)
@@ -1834,7 +1837,7 @@ class Character:
         nb_tasks_coins = await get_bank_item_qty(self.session, "tasks_coin")
         nb_tasks_coins_lots = (nb_tasks_coins - 100)//6
         if nb_tasks_coins_lots > 0:
-            await self.withdraw_items_from_bank({"tasks_coin": nb_tasks_coins_lots * 3})
+            await self.withdraw_items_from_bank({"tasks_coin": nb_tasks_coins_lots * 6})
             await self.move_to_task_master()
 
             for _ in range(nb_tasks_coins_lots):
@@ -1851,7 +1854,7 @@ class Character:
             game_task = await self.get_game_task()
 
         # If task is too difficult, change
-        while game_task.code in ["cultist_acolyte", "cultist_emperor", "lich"]:
+        while game_task.code in ["cultist_acolyte", "cultist_emperor", "lich", "bat"]:
             if await self.get_inventory_quantity("tasks_coin") == 0:
                 await self.withdraw_items_from_bank({"tasks_coin": 1})
             await self.move_to_task_master()
@@ -2283,11 +2286,24 @@ async def run_bot(character_object: Character):
 
 async def main():
     async with aiohttp.ClientSession() as session:
+        # Parallelization of initial API calls
+        tasks = [
+            asyncio.create_task(get_all_items(session)),
+            asyncio.create_task(get_all_monsters(session)),
+            asyncio.create_task(get_all_resources(session)),
+            asyncio.create_task(get_all_maps(session))
+        ]
 
-        items = {
-            item['code']: item
-            for item in await get_all_items(session)
-        }
+        items_data, monsters_data, resources_data, maps_data = await asyncio.gather(*tasks)
+
+        items = {item['code']: item for item in items_data}
+
+        environment = Environment(
+            items=items,
+            monsters=monsters_data,
+            resource_locations=resources_data,
+            maps=maps_data
+        )
 
         obsolete_equipments = await get_obsolete_equipments(session, items)
         all_equipments = get_crafted_items(items)
@@ -2297,13 +2313,6 @@ async def main():
 
         # Lich 96% > cursed_specter, gold_shield, cursed_hat, malefic_armor, piggy_pants, gold_boots, ruby_ring, ruby_ring, ruby_amulet
         # Lich 100% > cursed_specter, gold_shield, cursed_hat, malefic_armor, piggy_pants, gold_boots, ruby_ring, ruby_ring, magic_stone_amulet
-
-        environment = Environment(
-            items=items,
-            monsters=await get_all_monsters(session),
-            resource_locations=await get_all_resources(session),
-            maps=await get_all_maps(session)
-        )
 
         # Test filter
         given_items = [
