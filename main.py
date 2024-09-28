@@ -869,12 +869,9 @@ class Environment:
 
     def get_equipments(self) -> dict[str, dict]:
         return {
-            skill_name: {
-                equipment["code"]: equipment
-                for equipment in self.crafted_items
-                if equipment["craft"]["skill"] == skill_name
-            }
-            for skill_name in ['weaponcrafting', 'gearcrafting', 'jewelrycrafting']
+            item_code: item
+            for item_code, item in self.items.items()
+            if item["type"] in EQUIPMENTS_TYPES
         }
 
     def get_consumables(self) -> list[dict]:
