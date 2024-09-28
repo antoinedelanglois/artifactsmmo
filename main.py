@@ -147,13 +147,6 @@ def get_items_list_by_type(_items: dict[str, dict], _item_type: str) -> list[dic
     ]
 
 
-def get_crafted_items(_items: dict[str, dict]) -> dict[str, dict]:
-    return {
-        skill_name: {item["code"]: item for item in get_items_list_by_craft_skill(_items, skill_name)}
-        for skill_name in ['weaponcrafting', 'gearcrafting', 'jewelrycrafting', 'cooking']
-    }
-
-
 def get_equipments_by_type(_items: dict[str, dict]) -> dict[str, list[dict]]:
     return {
         equipment_type: get_items_list_by_type(_items, equipment_type)
@@ -213,7 +206,7 @@ def identify_obsolete_equipments(equipment_groups: dict[str, list[dict]]) -> lis
     return obsolete_equipments
 
 
-async def get_obsolete_equipments(session: aiohttp.ClientSession, _items: dict[str, dict]) -> list[dict]:
+async def get_obsolete_equipments(session: aiohttp.ClientSession, _items: dict[str, dict]) -> dict[str, dict]:
     equipment_groups = get_equipments_by_type(_items)
 
     # Récupérer les quantités des items une seule fois
@@ -230,7 +223,7 @@ async def get_obsolete_equipments(session: aiohttp.ClientSession, _items: dict[s
         map_equipments[equipment_type] = filtered_equipments
 
     obsolete_equipments = identify_obsolete_equipments(map_equipments)
-    return obsolete_equipments
+    return {equipment['code']: equipment for equipment in obsolete_equipments}
 
 
 async def get_all_items_quantities(session: aiohttp.ClientSession) -> dict[str, int]:
@@ -765,7 +758,7 @@ class Environment:
     def __post_init__(self):
         self.logger = logging.getLogger('environment')
         self.crafted_items = self.get_crafted_items()
-        self.equipments = self.get_equipments()
+        self.equipments: dict[str, dict] = self.get_equipments()
         self.consumables = self.get_consumables()
         self.dropped_items = self.get_dropped_items()
 
@@ -896,7 +889,7 @@ class Environment:
 class Character:
     session: aiohttp.ClientSession
     environment: Environment
-    all_equipments: dict[str, dict]     # TODO get it to dataclass
+    obsolete_equipments: dict[str, dict]     # TODO get it to dataclass
     name: str
     skills: list[str]
     max_fight_level: int = 0
@@ -911,7 +904,6 @@ class Character:
 
     def __post_init__(self):
         self.logger = logging.getLogger(self.name)
-        self.excluded_equipments = list(self.all_equipments['excluded'].keys())  # FIXME Shared amongst all characters
 
     async def initialize(self):
         """
@@ -2092,7 +2084,7 @@ class Character:
 
         # TODO only one loop on bank equipment
 
-        for item_code in self.excluded_equipments:
+        for item_code in self.obsolete_equipments:
             qty_at_bank = await get_bank_item_qty(self.session, item_code)
             if qty_at_bank > 0:
                 # If yes, withdraw them and get to workshop to recycle them, before getting back to bank to deposit all
@@ -2124,6 +2116,7 @@ class Character:
     async def get_fight_for_leveling_up_task(self) -> Task:
         # If XP can be gained by fighting, go
         if len(self.fight_objectives) > 0:
+            # FIXME check if monster is reachable (example: 'demon' only available during events)
             highest_fightable_monster = self.fight_objectives[0]
             return Task(
                 code=highest_fightable_monster['code'],
@@ -2136,7 +2129,7 @@ class Character:
     async def get_craft_for_equiping_task(self) -> Task:
         total_quantities = await get_all_items_quantities(self.session)
         # Keeping only the not yet available useful equipment
-        objectives_codes = [o['code'] for o in self.objectives if o['code'] not in self.excluded_equipments]
+        objectives_codes = [o['code'] for o in self.objectives if o['code'] not in self.obsolete_equipments]
         craftable_new_equipments = [
             i
             for i in self.craftable_items      # FIXME how is cooking handled?
@@ -2311,8 +2304,6 @@ async def main():
         )
 
         obsolete_equipments = await get_obsolete_equipments(session, items)
-        all_equipments = get_crafted_items(items)
-        all_equipments['excluded'] = {equipment['code']: 'excluded' for equipment in obsolete_equipments}
 
         # LOCAL_BANK = await get_bank_items(session)
 
@@ -2328,11 +2319,11 @@ async def main():
         logging.warning(f"Equipments that can only be given or dropped: {list(map(lambda x: x['code'], given_items))}")
 
         characters_ = [
-            Character(session=session, environment=environment, all_equipments=all_equipments, name='Kersh', max_fight_level=30, skills=['weaponcrafting', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
-            Character(session=session, environment=environment, all_equipments=all_equipments, name='Capu', max_fight_level=30, skills=['gearcrafting','woodcutting', 'mining']),  # 'gearcrafting',
-            Character(session=session, environment=environment, all_equipments=all_equipments, name='Brubu', max_fight_level=30, skills=['woodcutting', 'mining']),  # , 'fishing', 'mining', 'woodcutting'
-            Character(session=session, environment=environment, all_equipments=all_equipments, name='Crabex', max_fight_level=30, skills=['jewelrycrafting', 'woodcutting', 'mining']),  # 'jewelrycrafting', 'woodcutting'
-            Character(session=session, environment=environment, all_equipments=all_equipments, name='JeaGa', max_fight_level=30, skills=['mining', 'woodcutting']),  # 'cooking', 'fishing'
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Kersh', max_fight_level=30, skills=['weaponcrafting', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Capu', max_fight_level=30, skills=['gearcrafting', 'woodcutting', 'mining']),  # 'gearcrafting',
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Brubu', max_fight_level=30, skills=['woodcutting', 'mining']),  # , 'fishing', 'mining', 'woodcutting'
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Crabex', max_fight_level=30, skills=['jewelrycrafting', 'woodcutting', 'mining']),  # 'jewelrycrafting', 'woodcutting'
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='JeaGa', max_fight_level=30, skills=['mining', 'woodcutting']),  # 'cooking', 'fishing'
         ]
 
         # Initialize all characters asynchronously
