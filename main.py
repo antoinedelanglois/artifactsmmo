@@ -2267,14 +2267,6 @@ async def run_bot(character_object: Character):
 #         self.prices = prices_page_1 + prices_page_2
 #         self.last_update = current_time  # Update the timestamp
 
-# personae
-# ** WOOD CUTTER / PLANK CRAFTER
-# ** FISHER / COOKING MASTER
-# ** ORE MINER / BLACKSMITH
-# ** WARRIOR
-# + WEAPON CRAFTER
-# + GEAR CRAFTER
-# + JEWEL CRAFTER
 
 # FIXME consumable should be of the correct level to be equipped
 # FIXME if there is a task implying fight, make it priority
