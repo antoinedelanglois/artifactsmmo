@@ -2203,14 +2203,14 @@ async def run_bot(character_object: Character):
         if event_task is not None:
             character_object.task = event_task
         # No need to do game tasks if already a lot of task coins
-        elif await character_object.is_feasible_task(game_task) and (await get_bank_item_qty(character_object.session, "tasks_coin") < 150):
+        elif await character_object.is_feasible_task(game_task) and (await get_bank_item_qty(character_object.session, "tasks_coin") < 50):
             character_object.task = game_task
         elif recycling_task is not None:
             character_object.task = recycling_task
         # TODO get a task of leveling up on gathering if craftable items without autonomy
         elif craft_for_equiping_task is not None:
             character_object.task = craft_for_equiping_task
-        elif fight_for_leveling_up_task is not None and await character_object.got_enough_consumables(-1):
+        elif fight_for_leveling_up_task is not None and await character_object.got_enough_consumables(1):
             character_object.task = fight_for_leveling_up_task
         elif character_object.task.type == TaskType.IDLE:
             # find and assign a valid task
