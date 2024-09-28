@@ -474,63 +474,89 @@ async def get_dropping_resource_locations(session: aiohttp.ClientSession, _mater
         "drops": []
     }
 
-
 async def get_monster_vulnerabilities(monster_infos: dict) -> dict[str, int]:
+    vulnerabilities = {}
+    for element in ["fire", "earth", "water", "air"]:
+        res_key = f"res_{element}"
+        res_value = monster_infos.get(res_key, 0)
+        vulnerabilities[element] = res_value
+    return vulnerabilities
 
-    resistances = sorted([
-        res
-        for res in ["res_fire", "res_earth", "res_water", "res_air"]
-    ], key=lambda x: monster_infos.get(x, 0), reverse=False
+
+def select_best_support_equipment(current_item: dict, equipment_list: list[dict], vulnerabilities: dict[str, int]) -> dict:
+    if not equipment_list:
+        return current_item
+    if not current_item:
+        current_item = equipment_list[0]
+
+    def calculate_support_score(_effects: dict, vulnerabilities: dict[str, int]) -> float:
+        score = 0.0
+        for effect_name, effect_value in _effects.items():
+            if effect_name.startswith("dmg_"):
+                element = effect_name.replace("dmg_", "")
+                resistance = vulnerabilities.get(element, 0)
+                if resistance < 0:
+                    score += effect_value * 4 * (1 + abs(resistance) / 100 * 5)
+                elif resistance > 0:
+                    score += effect_value * 2 * (1 - resistance / 100 * 2)
+                else:
+                    score += effect_value * 1.0
+            elif effect_name.startswith("res_"):
+                element = effect_name.replace("res_", "")
+                resistance = vulnerabilities.get(element, 0)
+                if resistance < 0:
+                    score += effect_value * 3 * (1 + abs(resistance) / 100 * 5)
+                elif resistance > 0:
+                    score += effect_value * 1.5 * (1 - resistance / 100 * 2)
+                else:
+                    score += effect_value * 1.0
+            elif effect_name == "hp":
+                score += effect_value * 0.2  # Diminuer encore le poids des HP
+            elif effect_name == "defense":
+                score += effect_value * 0.5
+            else:
+                score += effect_value
+        return score
+
+    best_item = current_item
+    best_score = calculate_support_score(
+        {effect['name']: effect['value'] for effect in current_item.get('effects', [])},
+        vulnerabilities
     )
+    logging.debug(f"Current equipment: {current_item.get('code', 'None')} with score {best_score}")
 
-    if any([monster_infos.get(res, 0) < 0 for res in resistances]):
-        resistances = [res for res in resistances if monster_infos.get(res, 0) < 0]
-    else:
-        resistances = [resistances[0]]      # FIXME get the lesser values
+    for item in equipment_list:
+        item_effects = {effect['name']: effect['value'] for effect in item.get('effects', [])}
+        item_score = calculate_support_score(item_effects, vulnerabilities)
+        logging.debug(f"Evaluating equipment: {item['code']} with score {item_score}")
+        if item_score > best_score:
+            best_item = item
+            best_score = item_score
+            logging.info(f"Best equipment updated to {best_item['code']} with score {best_score}")
 
-    # FIXME
-    if resistances == ['res_fire', 'res_water']:
-        resistances = ['res_water']
-
-    logging.debug(f' Here is the resistances: {resistances}')
-
-    return {resistance.replace("res_", ""): -1 * monster_infos.get(resistance, 0) for resistance in resistances}
+    return best_item
 
 
 async def select_best_equipment_set(current_equipments: dict, sorted_valid_equipments: dict[str, list[dict]], vulnerabilities: dict) -> dict[str, dict]:
-    """
-    Selects the best equipment set based on monster vulnerabilities and equipment effects.
-
-    :param current_equipments: The currently equipped items per slot (or empty dict if none equipped).
-    :param sorted_valid_equipments: A dictionary of lists of valid equipment items per slot, sorted by level.
-    :param vulnerabilities: A dictionary of the monster's elemental vulnerabilities with their percentages.
-    :return: The selected best equipment set.
-    """
     selected_equipments = {}
 
-    # First, select the best weapon based on vulnerabilities
-    weapon_current = current_equipments.get('weapon', {})
-    weapon_list = sorted_valid_equipments.get('weapon', [])
-    best_weapon = select_best_weapon(weapon_current, weapon_list, vulnerabilities)
+    # Sélectionner la meilleure arme (code existant)
+    best_weapon = select_best_weapon(current_equipments.get('weapon', {}), sorted_valid_equipments.get('weapon', []), vulnerabilities)
     selected_equipments['weapon'] = best_weapon
 
-    # Determine the primary attack elements of the selected weapon
-    weapon_effects = {effect['name']: effect['value'] for effect in best_weapon.get('effects', [])}
-    primary_attack_elements = [effect_name.replace('attack_', '') for effect_name in weapon_effects.keys() if effect_name.startswith('attack_')]
-
-    # Now, select the best equipment for other slots that enhance the selected weapon
+    # Sélectionner les meilleurs équipements de support en fonction des vulnérabilités
     for slot in EQUIPMENTS_SLOTS:
         if slot == 'weapon':
             continue
         current_item = current_equipments.get(slot, {})
         equipment_list = sorted_valid_equipments.get(slot, [])
-        best_item = select_best_support_equipment(current_item, equipment_list, primary_attack_elements)
+        best_item = select_best_support_equipment(current_item, equipment_list, vulnerabilities)
         selected_equipments[slot] = best_item
 
     return selected_equipments
 
 
-def select_best_weapon(current_weapon: dict, weapon_list: list[dict], vulnerabilities: dict) -> dict:
+def select_best_weapon(current_weapon: dict, weapon_list: list[dict], vulnerabilities: dict[str, int]) -> dict:
     """
     Selects the best weapon based on vulnerabilities.
     """
@@ -539,121 +565,47 @@ def select_best_weapon(current_weapon: dict, weapon_list: list[dict], vulnerabil
     if not current_weapon:
         current_weapon = weapon_list[0]
 
-    # Determine if all vulnerabilities are equal
-    vulnerability_percentages = list(vulnerabilities.values())
-    vulnerabilities_equal = all(pct == vulnerability_percentages[0] for pct in vulnerability_percentages)
-
-    def calculate_weapon_score(_effects: dict, _vulnerabilities: dict, _vulnerabilities_equal: bool) -> float:
-        """
-        Calculate the weapon score based on the effects and vulnerabilities.
-        """
+    def calculate_weapon_score(_effects: dict, vulnerabilities: dict[str, int]) -> float:
         score = 0.0
-        total_attack = 0.0  # Used when vulnerabilities are equal to prioritize damage
         for effect_name, effect_value in _effects.items():
             if effect_name.startswith("attack_"):
                 element = effect_name.replace("attack_", "")
-                total_attack += effect_value
-                if _vulnerabilities_equal:
-                    score += effect_value * 4  # High weight for attack effects
+                resistance = vulnerabilities.get(element, 0)
+                if resistance < 0:
+                    # Monster is vulnerable, increase the score significantly
+                    score += effect_value * 4 * (1 + abs(resistance) / 100 * 5)
+                elif resistance > 0:
+                    # Monster has resistance, decrease the score significantly
+                    score += effect_value * 4 * (1 - resistance / 100 * 2)
                 else:
-                    if element in _vulnerabilities:
-                        percentage = _vulnerabilities[element]
-                        score += effect_value * 4 * (percentage / 100)  # Weight by vulnerability percentage
-                    else:
-                        score += effect_value  # Lesser weight for non-vulnerable elements
+                    # Neutral element, give lower weight
+                    score += effect_value * 2
             elif effect_name.startswith("dmg_"):
-                element = effect_name.replace("dmg_", "")
-                if _vulnerabilities_equal:
-                    score += effect_value * 3
-                else:
-                    if element in _vulnerabilities:
-                        percentage = _vulnerabilities[element]
-                        score += effect_value * 3 * (percentage / 100)
+                # Peut être pris en compte si pertinent
+                pass
             elif effect_name == "hp":
                 score += effect_value * 0.25
             elif effect_name == "defense":
                 score += effect_value * 0.5
             else:
-                score += effect_value  # Default score for other effects
-
-        # If vulnerabilities are equal, prioritize equipment with the highest total attack
-        if _vulnerabilities_equal:
-            score += total_attack * 2  # Additional weight for total attack
+                score += effect_value
         return score
 
     best_weapon = current_weapon
     best_score = calculate_weapon_score(
         {effect['name']: effect['value'] for effect in current_weapon.get('effects', [])},
-        vulnerabilities,
-        vulnerabilities_equal
+        vulnerabilities
     )
 
     for weapon in weapon_list:
         weapon_effects = {effect['name']: effect['value'] for effect in weapon.get('effects', [])}
-        weapon_score = calculate_weapon_score(weapon_effects, vulnerabilities, vulnerabilities_equal)
+        weapon_score = calculate_weapon_score(weapon_effects, vulnerabilities)
         if weapon_score > best_score:
             best_weapon = weapon
             best_score = weapon_score
             logging.debug(f"Best weapon updated to {best_weapon['code']} with score {best_score}'")
 
     return best_weapon
-
-
-def select_best_support_equipment(current_item: dict, equipment_list: list[dict], primary_attack_elements: list[str]) -> dict:
-    """
-    Selects the best support equipment that enhances the selected weapon.
-
-    :param current_item: The currently equipped item (or empty dict if none equipped).
-    :param equipment_list: A list of valid equipment items for the slot.
-    :param primary_attack_elements: List of primary attack elements from the selected weapon.
-    :return: The selected best support equipment.
-    """
-    if not equipment_list:
-        return current_item
-    if not current_item:
-        current_item = equipment_list[0]
-
-    def calculate_support_score(_effects: dict, primary_elements: list[str]) -> float:
-        """
-        Calculate the support equipment score based on how well it enhances the weapon's primary elements.
-        """
-        score = 0.0
-        for effect_name, effect_value in _effects.items():
-            if effect_name.startswith("attack_"):
-                element = effect_name.replace("attack_", "")
-                if element in primary_elements:
-                    score += effect_value * 4  # High weight for matching attack elements
-                else:
-                    score += effect_value  # Lesser weight for other elements
-            elif effect_name.startswith("dmg_"):
-                element = effect_name.replace("dmg_", "")
-                if element in primary_elements:
-                    score += effect_value * 3  # Weight for matching damage effects
-                else:
-                    score += effect_value
-            elif effect_name == "hp":
-                score += effect_value * 0.25
-            elif effect_name == "defense":
-                score += effect_value * 0.5
-            else:
-                score += effect_value  # Default score for other effects
-        return score
-
-    best_item = current_item
-    best_score = calculate_support_score(
-        {effect['name']: effect['value'] for effect in current_item.get('effects', [])},
-        primary_attack_elements
-    )
-
-    for item in equipment_list:
-        item_effects = {effect['name']: effect['value'] for effect in item.get('effects', [])}
-        item_score = calculate_support_score(item_effects, primary_attack_elements)
-        if item_score > best_score:
-            best_item = item
-            best_score = item_score
-            logging.debug(f"Best {item.get('slot', 'equipment')} updated to {best_item['code']} with score {best_score}'")
-
-    return best_item
 
 
 async def select_best_equipment(equipment1_infos: dict, sorted_valid_equipments: list[dict], vulnerabilities: dict[str, int]) -> dict:
