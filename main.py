@@ -130,14 +130,6 @@ def extract_cooldown_time(message):
     return None
 
 
-def get_items_list_by_craft_skill(_items: dict[str, dict], craft_skill_name: str) -> list[dict]:
-    return [
-        item
-        for _, item in _items.items()
-        if item["craft"] and item["craft"]["skill"] == craft_skill_name
-    ]
-
-
 def get_items_list_by_type(_items: dict[str, dict], _item_type: str) -> list[dict]:
     return [
         item
@@ -852,22 +844,31 @@ class Character(BaseModel):
         """
         craftable_items = []
 
-        # for item in self.environment.crafted_items:
-        #     if item["level"] <= infos[f'{item["skill"]}_level']:
-        #         craftable_items.append(item)
-
-        for crafting_skill in self.skills:
-            if crafting_skill == 'fishing':
-                crafting_skill = 'cooking'
-            skill_level = infos[f'{crafting_skill}_level']
-            skill_craftable_items = [item for item in get_items_list_by_craft_skill(self.environment.items, crafting_skill) if item['level'] <= skill_level]
-            self._logger.debug(f' crafting_skill: {crafting_skill} > {[i["code"] for i in skill_craftable_items]}')
-            craftable_items.extend(skill_craftable_items[::-1])
+        # for crafting_skill in self.skills:
+            # if crafting_skill == 'fishing':
+            #     crafting_skill = 'cooking'
+            # skill_level = infos[f'{crafting_skill}_level']
+            # skill_craftable_items = [item for item in get_items_list_by_craft_skill(self.environment.items, crafting_skill) if item['level'] <= skill_level]
+        skill_craftable_items = [item for item in self.environment.crafted_items if item['level'] < infos[f'{item["craft"]["skill"]}_level']]
+            # self._logger.debug(f' crafting_skill: {crafting_skill} > {[i["code"] for i in skill_craftable_items]}')
+        craftable_items.extend(skill_craftable_items[::-1])
         # TODO exclude protected items (such as the one using jasper_crystal)
+
+        # If there is enough ores in bank, activate crafting
+        excluded_item_codes = [
+            item_code
+            for item_code in ['strangold', 'obsidian', 'magical_plank']   # Crafted from event resources
+            if any([
+                await get_bank_item_qty(self.session, material_code) < self.stock_qty_objective
+                for material_code in get_craft_recipee(self.environment.items[item_code])
+                if material_code in ['strange_ore', 'piece_of_obsidian', 'magic_wood']   # Gathered from event resources
+            ])
+        ]
+
         filtered_craftable_items = [
             item
             for item in craftable_items
-            if item['code'] not in ['strangold', 'obsidian']    # FIXME dynamic exclusion
+            if item['code'] not in excluded_item_codes
         ]
         self.craftable_items = filtered_craftable_items
         self._logger.warning(f"Craftable items for {self.name}: {[i['code'] for i in self.craftable_items]}")
@@ -912,7 +913,7 @@ class Character(BaseModel):
         objectives = [
             item
             for item in self.craftable_items
-            if await self.can_be_home_made(item) and await self.does_item_provide_xp(item) and item["code"] not in ["magical_plank"]
+            if await self.can_be_home_made(item) and await self.does_item_provide_xp(item)
         ]
 
         need_level_up_craftable_items = [
@@ -933,11 +934,18 @@ class Character(BaseModel):
         resource_objectives = [
             resource
             for resource in self.gatherable_resources
-            if await self.can_be_home_made(resource) and await self.does_item_provide_xp(resource) and resource["code"] not in ["magic_tree"]
+            if await self.can_be_home_made(resource) and await self.does_item_provide_xp(resource) and resource["code"] not in ["magic_tree", "demon"]
         ]
 
         item_objectives.extend(resource_objectives[::-1])
         # objectives.extend(self.fightable_materials[::-1])
+
+        # Filter according to defined craft skills
+        item_objectives = [
+            item
+            for item in item_objectives
+            if (item.get('craft') and item['craft']['skill'] in self.skills) or (item['type'] == 'resource' and item['subtype'] in self.skills)
+        ]
 
         fight_objectives = [
             monster
@@ -1315,16 +1323,17 @@ class Character(BaseModel):
             return 0
 
     async def is_gatherable(self, resource_code) -> bool:
-        # return resource_code in [item["code"] for item in self.gatherable_resources] and resource_code in [item["code"] for item in self.objectives]
         return resource_code in [item["code"] for item in self.gatherable_resources]
 
     async def is_fightable(self, material_code) -> bool:
-        # return material_code in [item["code"] for item in self.fightable_materials] and material_code in [item["code"] for item in self.objectives]
         return material_code in [item["code"] for item in self.fightable_materials]
 
     async def is_craftable(self, item_code) -> bool:
-        # return item_code in [item["code"] for item in self.craftable_items] and item_code in [item["code"] for item in self.objectives]
         return item_code in [item["code"] for item in self.craftable_items]
+
+    async def is_collectable_at_bank(self, item_code, quantity) -> bool:
+        qty_at_bank = await get_bank_item_qty(self.session, item_code)
+        return qty_at_bank > 3 * quantity
 
     async def move_to_workshop(self):
         # get the skill out of item
@@ -1820,46 +1829,37 @@ class Character(BaseModel):
     async def prepare_for_task(self) -> dict[str, dict[str, int]]:
         gather_details, collect_details, fight_details = {}, {}, {}
 
-        if self.task.type == TaskType.ITEMS:
-            craft_recipee = {m['code']: m['quantity'] for m in self.task.details['craft']['items']}
-        else:
-            craft_recipee = {self.task.code: 1}
+        craft_recipee = get_craft_recipee(self.task.details)
 
         target_details = {
             k: v*self.task.total
             for k, v in craft_recipee.items()
         }
 
-        for material, qty in target_details.items():
+        for material_code, qty in target_details.items():
 
             # TODO qualify item: craftable? gatherable? fightable?
-            self._logger.debug(f' Check material {material}')
+            self._logger.debug(f' Check material {material_code}')
 
-            qty_at_bank = await get_bank_item_qty(self.session, material)
-            self._logger.debug(f' Qty of {material} available at bank: {qty_at_bank}')
-            if qty_at_bank > 3*qty:
-                # Réserver le montant pour qu'un autre personnage ne compte pas dessus
-                qty_to_collect = min(qty, qty_at_bank)
-                collect_details[material] = qty_to_collect
-                qty -= qty_to_collect
-                self._logger.debug(f' Collectable from bank {qty_at_bank}. remaining to get {qty}')
-                if qty == 0:
-                    continue
-            if await self.is_craftable(material):
+            if await self.is_collectable_at_bank(material_code, qty):
+                # FIXME Réserver le montant pour qu'un autre personnage ne compte pas dessus
+                collect_details[material_code] = qty
+                continue
+            if await self.is_craftable(material_code):
                 # Set material as craft target
-                self._logger.info(f' Resetting task to {material}')
-                await self.set_task(self.environment.items[material], TaskType.ITEMS, qty)
+                self._logger.info(f' Resetting task to {material_code}')
+                await self.set_task(self.environment.items[material_code], TaskType.ITEMS, qty)
                 # "Dé-réserver" les articles de banque
                 return await self.prepare_for_task()
-            if await self.is_gatherable(material):
-                gather_details[material] = qty
+            if await self.is_gatherable(material_code):
+                gather_details[material_code] = qty
                 self._logger.debug(f' Gatherable qty {qty}')
                 continue
-            if await self.is_fightable(material):
-                fight_details[material] = qty
+            if await self.is_fightable(material_code):
+                fight_details[material_code] = qty
                 self._logger.debug(f' Fightable for qty {qty}')
                 continue
-            self._logger.warning(f" Material {material} won't provide XP...")
+            self._logger.warning(f" Material {material_code} won't provide XP...")
         return {
             'gather': gather_details,
             'collect': collect_details,
