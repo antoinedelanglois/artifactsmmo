@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import re
 import os
 from dotenv import load_dotenv
+from pydantic import BaseModel
 
 # Charger les variables d'environnement depuis le fichier .env
 load_dotenv()
@@ -113,15 +114,12 @@ async def get_status(session: aiohttp.ClientSession) -> dict:
     return data["data"] if data else {}
 
 
-async def get_max_level(session: aiohttp.ClientSession) -> int:
+async def get_all_status(session: aiohttp.ClientSession) -> dict:
     status = await get_status(session)
-    return status["max_level"]
-
-
-async def get_server_time(session: aiohttp.ClientSession) -> str:
-    status = await get_status(session)
-    return status["server_time"]
-
+    return {
+        "max_level": status.get("max_level", 40),
+        "server_time": status.get("server_time", "")
+    }
 
 def extract_cooldown_time(message):
     """Extracts cooldown time from the message using regex."""
@@ -298,18 +296,6 @@ async def get_bank_item_qty(session: aiohttp.ClientSession, _item_code: str) -> 
     return res.get(_item_code, 0)
 
 
-async def get_item_infos(session: aiohttp.ClientSession, _item_code: str) -> dict:
-    url = f"{SERVER}/items/{_item_code}"
-    data = await make_request(session=session, method='GET', url=url)
-    return data["data"]["item"] if data else {}
-
-
-async def get_resource_infos(session: aiohttp.ClientSession, _resource_code: str) -> dict:
-    url = f"{SERVER}/resources/{_resource_code}"
-    data = await make_request(session=session, method='GET', url=url)
-    return data["data"] if data else {}
-
-
 def get_craft_recipee(_item: dict) -> dict[str, int]:
     if _item.get('craft', None) is not None:
         return {m['code']: m['quantity'] for m in _item['craft']['items']}
@@ -443,13 +429,6 @@ async def get_all_items(session: aiohttp.ClientSession, params: dict = None) -> 
         else:
             break
     return items
-
-
-async def is_protected_material(session: aiohttp.ClientSession, _material_code: str) -> bool:
-    material_infos = await get_item_infos(session, _material_code)
-    is_task_material = material_infos["type"] == "resource" and material_infos["subtype"] == "task"
-    is_rare_material = _material_code in ['topaz', 'emerald', 'ruby', 'sapphire', 'sap']
-    return is_task_material or is_rare_material
 
 
 async def is_valid_equipment(_equipment: dict) -> bool:
@@ -700,15 +679,25 @@ class Task:
     is_event: bool = False
 
 
-@dataclass
-class Environment:
+class Status(BaseModel):
+    max_level: int
+    server_time: str
+
+
+class Environment(BaseModel):
     items: dict[str, dict]
     monsters: dict[str, dict]
     resource_locations: dict[str, dict]
     maps: list[dict]
+    status: Status
+    # logger: logging.Logger = None
+    crafted_items: list[dict] = None
+    equipments: dict[str, dict] = None
+    consumables: list[dict] = None
+    dropped_items: list[dict] = None
 
-    def __post_init__(self):
-        self.logger = logging.getLogger('environment')
+    def model_post_init(self, __context) -> None:
+        # self.logger = logging.getLogger('environment')
         self.crafted_items = self.get_crafted_items()
         self.equipments: dict[str, dict] = self.get_equipments()
         self.consumables = self.get_consumables()
@@ -720,7 +709,7 @@ class Environment:
 
     @staticmethod
     def is_item_rare(item: dict) -> bool:
-        return item["code"] in ['topaz', 'emerald', 'ruby', 'sapphire', 'sap']
+        return item["code"] in ['topaz', 'emerald', 'ruby', 'sapphire', 'sap', 'magic_sap', 'diamond']
 
     @staticmethod
     def is_item_protected(item: dict) -> bool:
@@ -732,7 +721,7 @@ class Environment:
             for consumable in self.consumables
             # if any(["boost" in effect["name"] for effect in cooked_consumable['effects']])
         ]
-        self.logger.debug(f'Protected consumables: {[c["code"] for c in protected_consumable]}')
+        # self.logger.debug(f'Protected consumables: {[c["code"] for c in protected_consumable]}')
         return consumable["code"] in [c["code"] for c in protected_consumable]
 
     @staticmethod       # TODO have an Item class
@@ -779,7 +768,7 @@ class Environment:
         item_dropping_monsters = self.get_item_dropping_monsters(item_code)
         if len(item_dropping_monsters) > 0:
             return item_dropping_monsters[0][0]
-        self.logger.error(f" Unknown dropped item {item_code}")
+        # self.logger.error(f" Unknown dropped item {item_code}")
         return {}
 
     def get_item_dropping_locations(self, item_code: str) -> list[tuple[dict, int]]:
@@ -795,14 +784,14 @@ class Environment:
         item_dropping_locations = self.get_item_dropping_locations(item_code)
         if len(item_dropping_locations) > 0:
             return item_dropping_locations[0][0]
-        self.logger.error(f" Unknown dropped item {item_code}")
+        # self.logger.error(f" Unknown dropped item {item_code}")
         return {}
 
     def get_item_dropping_max_rate(self, item_code: str) -> int:
         item_dropping_locations = self.get_item_dropping_locations(item_code)
         if len(item_dropping_locations) > 0:
             return item_dropping_locations[0][1]
-        self.logger.error(f" Unknown dropped item {item_code}")
+        # self.logger.error(f" Unknown dropped item {item_code}")
         return 9999
 
     def get_dropped_items(self) -> list[dict]:
@@ -1515,12 +1504,12 @@ class Character:
         item_level = item_details['level']
 
         # Example threshold: if item is within 10 levels of the character's skill level, it gives XP
-        return item_level >= (skill_level - 10) and skill_level < await get_max_level(self.session)
+        return item_level >= (skill_level - 10) and skill_level < self.environment.status.max_level
 
     async def does_fight_provide_xp(self, monster: dict) -> bool:
         character_level = await self.get_level()
         monster_level = monster['level']
-        return monster_level >= (character_level - 10) and character_level < await get_max_level(self.session)
+        return monster_level >= (character_level - 10) and character_level < self.environment.status.max_level
 
     async def select_eligible_targets(self) -> list[str]:
         """
@@ -2230,10 +2219,11 @@ async def main():
             asyncio.create_task(get_all_items(session)),
             asyncio.create_task(get_all_monsters(session)),
             asyncio.create_task(get_all_resources(session)),
-            asyncio.create_task(get_all_maps(session))
+            asyncio.create_task(get_all_maps(session)),
+            asyncio.create_task(get_all_status(session))
         ]
 
-        items_data, monsters_data, resources_data, maps_data = await asyncio.gather(*tasks)
+        items_data, monsters_data, resources_data, maps_data, status = await asyncio.gather(*tasks)
 
         items = {item['code']: item for item in items_data}
 
@@ -2241,7 +2231,8 @@ async def main():
             items=items,
             monsters=monsters_data,
             resource_locations=resources_data,
-            maps=maps_data
+            maps=maps_data,
+            status=status
         )
 
         obsolete_equipments = await get_obsolete_equipments(session, items)
