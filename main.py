@@ -690,14 +690,12 @@ class Environment(BaseModel):
     resource_locations: dict[str, dict]
     maps: list[dict]
     status: Status
-    # logger: logging.Logger = None
     crafted_items: list[dict] = None
     equipments: dict[str, dict] = None
     consumables: list[dict] = None
     dropped_items: list[dict] = None
 
     def model_post_init(self, __context) -> None:
-        # self.logger = logging.getLogger('environment')
         self.crafted_items = self.get_crafted_items()
         self.equipments: dict[str, dict] = self.get_equipments()
         self.consumables = self.get_consumables()
@@ -721,7 +719,6 @@ class Environment(BaseModel):
             for consumable in self.consumables
             # if any(["boost" in effect["name"] for effect in cooked_consumable['effects']])
         ]
-        # self.logger.debug(f'Protected consumables: {[c["code"] for c in protected_consumable]}')
         return consumable["code"] in [c["code"] for c in protected_consumable]
 
     @staticmethod       # TODO have an Item class
@@ -768,7 +765,6 @@ class Environment(BaseModel):
         item_dropping_monsters = self.get_item_dropping_monsters(item_code)
         if len(item_dropping_monsters) > 0:
             return item_dropping_monsters[0][0]
-        # self.logger.error(f" Unknown dropped item {item_code}")
         return {}
 
     def get_item_dropping_locations(self, item_code: str) -> list[tuple[dict, int]]:
@@ -784,14 +780,12 @@ class Environment(BaseModel):
         item_dropping_locations = self.get_item_dropping_locations(item_code)
         if len(item_dropping_locations) > 0:
             return item_dropping_locations[0][0]
-        # self.logger.error(f" Unknown dropped item {item_code}")
         return {}
 
     def get_item_dropping_max_rate(self, item_code: str) -> int:
         item_dropping_locations = self.get_item_dropping_locations(item_code)
         if len(item_dropping_locations) > 0:
             return item_dropping_locations[0][1]
-        # self.logger.error(f" Unknown dropped item {item_code}")
         return 9999
 
     def get_dropped_items(self) -> list[dict]:
