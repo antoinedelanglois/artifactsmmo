@@ -855,15 +855,22 @@ class Character(BaseModel):
         # TODO exclude protected items (such as the one using jasper_crystal)
 
         # If there is enough ores in bank, activate crafting
-        excluded_item_codes = [
-            item_code
-            for item_code in ['strangold', 'obsidian', 'magical_plank']   # Crafted from event resources
-            if any([
-                await get_bank_item_qty(self.session, material_code) < self.stock_qty_objective
-                for material_code in get_craft_recipee(self.environment.items[item_code])
-                if material_code in ['strange_ore', 'piece_of_obsidian', 'magic_wood']   # Gathered from event resources
-            ])
-        ]
+        # excluded_item_codes = [
+        #     item_code
+        #     for item_code in ['strangold', 'obsidian', 'magical_plank']   # Crafted from event resources
+        #     if any([
+        #         await get_bank_item_qty(self.session, material_code) < self.stock_qty_objective
+        #         for material_code in get_craft_recipee(self.environment.items[item_code])
+        #         if material_code in ['strange_ore', 'piece_of_obsidian', 'magic_wood']   # Gathered from event resources
+        #     ])
+        # ]
+        excluded_item_codes = []
+        for item_code in ['strangold', 'obsidian', 'magical_plank']:
+            for material_code in get_craft_recipee(self.environment.items[item_code]):
+                if material_code in ['strange_ore', 'piece_of_obsidian', 'magic_wood']:
+                    if await get_bank_item_qty(self.session, material_code) < self.stock_qty_objective:
+                        excluded_item_codes.append(item_code)
+                        continue
 
         filtered_craftable_items = [
             item
