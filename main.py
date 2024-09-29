@@ -1796,6 +1796,11 @@ class Character(BaseModel):
             details=item
         )
 
+    async def get_task_type(self, item: dict) -> TaskType:
+        if item["code"] in [i['code'] for i in self.gatherable_resources]:
+            return TaskType.RESOURCES
+        return TaskType.ITEMS
+
     async def get_task(self) -> Task:
 
         objective = await self.get_best_objective()     # FIXME get it depending on potential XP gain
@@ -1803,16 +1808,11 @@ class Character(BaseModel):
         # FIXME could be checked here amongst craftable items first, then gatherable ones
 
         # objective is an item > task will be crafting or gathering
-        if objective["code"] in [item['code'] for item in self.gatherable_resources]:
-            total_nb_materials = 1
-            task_type = TaskType.RESOURCES
-        else:   # Not gatherable -> Means it is craftable
-            total_nb_materials = sum([qty for _, qty in get_craft_recipee(objective).items()])
-            task_type = TaskType.ITEMS
+        total_nb_materials = sum([qty for _, qty in get_craft_recipee(objective).items()])
 
         return Task(
             code=objective["code"],
-            type=task_type,
+            type=await self.get_task_type(objective),
             total=(await self.get_inventory_max_size()) // total_nb_materials,
             details=objective
         )
