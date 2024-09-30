@@ -649,7 +649,7 @@ class Environment(BaseModel):
     status: Status
     crafted_items: list[dict] = None
     equipments: dict[str, dict] = None
-    consumables: list[dict] = None
+    consumables: dict[str, dict] = None
     dropped_items: list[dict] = None
 
     # Allow arbitrary types if necessary (e.g., for custom types like Status)
@@ -677,7 +677,7 @@ class Environment(BaseModel):
     def is_consumable_protected(self, consumable: dict) -> bool:
         protected_consumable = [
             consumable
-            for consumable in self.consumables
+            for consumable in self.consumables.values()
             # if any(["boost" in effect["name"] for effect in cooked_consumable['effects']])
         ]
         return consumable["code"] in [c["code"] for c in protected_consumable]
@@ -770,12 +770,12 @@ class Environment(BaseModel):
             if item["type"] in EQUIPMENTS_TYPES
         }
 
-    def get_consumables(self) -> list[dict]:
-        return [
-            item
+    def get_consumables(self) -> dict[str, dict]:
+        return {
+            item["code"]: item
             for item in self.crafted_items
             if self.is_item_a_consumable(item)
-        ]
+        }
 
 
 class Character(BaseModel):
@@ -1515,7 +1515,7 @@ class Character(BaseModel):
     async def get_eligible_bank_consumables(self) -> list[dict]:
         return [
             consumable_infos
-            for consumable_infos in self.environment.consumables
+            for consumable_infos in self.environment.consumables.values()
             if await get_bank_item_qty(self.session, consumable_infos["code"]) > 0 and consumable_infos['level'] <= await self.get_level()
         ]
 
