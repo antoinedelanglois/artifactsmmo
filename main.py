@@ -3,7 +3,6 @@ import asyncio
 from enum import Enum
 import logging
 from aiohttp.client_exceptions import ClientConnectorError
-from dataclasses import dataclass
 import re
 import os
 from dotenv import load_dotenv
@@ -427,12 +426,12 @@ def select_best_support_equipment(current_item: dict, equipment_list: list[dict]
     if not current_item:
         current_item = equipment_list[0]
 
-    def calculate_support_score(_effects: dict, vulnerabilities: dict[str, int]) -> float:
+    def calculate_support_score(_effects: dict, _vulnerabilities: dict[str, int]) -> float:
         score = 0.0
         for effect_name, effect_value in _effects.items():
             if effect_name.startswith("dmg_"):
                 element = effect_name.replace("dmg_", "")
-                resistance = vulnerabilities.get(element, 0)
+                resistance = _vulnerabilities.get(element, 0)
                 if resistance < 0:
                     score += effect_value * 4 * (1 + abs(resistance) / 100 * 5)
                 elif resistance > 0:
@@ -441,7 +440,7 @@ def select_best_support_equipment(current_item: dict, equipment_list: list[dict]
                     score += effect_value * 1.0
             elif effect_name.startswith("res_"):
                 element = effect_name.replace("res_", "")
-                resistance = vulnerabilities.get(element, 0)
+                resistance = _vulnerabilities.get(element, 0)
                 if resistance < 0:
                     score += effect_value * 3 * (1 + abs(resistance) / 100 * 5)
                 elif resistance > 0:
@@ -503,12 +502,12 @@ def select_best_weapon(current_weapon: dict, weapon_list: list[dict], vulnerabil
     if not current_weapon:
         current_weapon = weapon_list[0]
 
-    def calculate_weapon_score(_effects: dict, vulnerabilities: dict[str, int]) -> float:
+    def calculate_weapon_score(_effects: dict, _vulnerabilities: dict[str, int]) -> float:
         score = 0.0
         for effect_name, effect_value in _effects.items():
             if effect_name.startswith("attack_"):
                 element = effect_name.replace("attack_", "")
-                resistance = vulnerabilities.get(element, 0)
+                resistance = _vulnerabilities.get(element, 0)
                 if resistance < 0:
                     # Monster is vulnerable, increase the score significantly
                     score += effect_value * 4 * (1 + abs(resistance) / 100 * 5)
@@ -842,28 +841,10 @@ class Character(BaseModel):
         """
         Fetch and set craftable items based on the character's craft skill and level
         """
-        craftable_items = []
-
-        # for crafting_skill in self.skills:
-            # if crafting_skill == 'fishing':
-            #     crafting_skill = 'cooking'
-            # skill_level = infos[f'{crafting_skill}_level']
-            # skill_craftable_items = [item for item in get_items_list_by_craft_skill(self.environment.items, crafting_skill) if item['level'] <= skill_level]
         skill_craftable_items = [item for item in self.environment.crafted_items if item['level'] < infos[f'{item["craft"]["skill"]}_level']]
-            # self._logger.debug(f' crafting_skill: {crafting_skill} > {[i["code"] for i in skill_craftable_items]}')
-        craftable_items.extend(skill_craftable_items[::-1])
+        craftable_items = skill_craftable_items[::-1]
         # TODO exclude protected items (such as the one using jasper_crystal)
 
-        # If there is enough ores in bank, activate crafting
-        # excluded_item_codes = [
-        #     item_code
-        #     for item_code in ['strangold', 'obsidian', 'magical_plank']   # Crafted from event resources
-        #     if any([
-        #         await get_bank_item_qty(self.session, material_code) < self.stock_qty_objective
-        #         for material_code in get_craft_recipee(self.environment.items[item_code])
-        #         if material_code in ['strange_ore', 'piece_of_obsidian', 'magic_wood']   # Gathered from event resources
-        #     ])
-        # ]
         excluded_item_codes = []
         for item_code in ['strangold', 'obsidian', 'magical_plank']:
             for material_code in get_craft_recipee(self.environment.items[item_code]):
