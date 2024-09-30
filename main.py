@@ -31,6 +31,7 @@ EQUIPMENTS_SLOTS = ['weapon', 'shield', 'helmet', 'body_armor', 'leg_armor', 'bo
                     'amulet', 'artifact1', 'artifact2', 'artifact3']
 EQUIPMENTS_TYPES = ['weapon', 'shield', 'helmet', 'body_armor', 'leg_armor', 'boots', 'ring',
                     'amulet', 'artifact']
+EXCLUDED_MONSTERS = ["cultist_acolyte", "cultist_emperor", "lich", "bat"]
 
 
 def handle_incorrect_status_code(_status_code: int) -> str:
@@ -420,27 +421,94 @@ async def get_monster_vulnerabilities(monster_infos: dict) -> dict[str, int]:
     return vulnerabilities
 
 
-def select_best_support_equipment(current_item: dict, equipment_list: list[dict], vulnerabilities: dict[str, int]) -> dict:
+# def select_best_support_equipment(current_item: dict, equipment_list: list[dict], vulnerabilities: dict[str, int]) -> dict:
+#     if not equipment_list:
+#         return current_item
+#     if not current_item:
+#         current_item = equipment_list[0]
+#
+#     def calculate_support_score(_effects: dict, _vulnerabilities: dict[str, int]) -> float:
+#         score = 0.0
+#         for effect_name, effect_value in _effects.items():
+#             if effect_name.startswith("dmg_"):
+#                 element = effect_name.replace("dmg_", "")
+#                 resistance = _vulnerabilities.get(element, 0)
+#                 if resistance < 0:
+#                     score += effect_value * 4 * (1 + abs(resistance) / 100 * 5)
+#                 elif resistance > 0:
+#                     score += effect_value * 2 * (1 - resistance / 100 * 2)
+#                 else:
+#                     score += effect_value * 1.0
+#             elif effect_name.startswith("res_"):
+#                 element = effect_name.replace("res_", "")
+#                 resistance = _vulnerabilities.get(element, 0)
+#                 if resistance < 0:
+#                     score += effect_value * 3 * (1 + abs(resistance) / 100 * 5)
+#                 elif resistance > 0:
+#                     score += effect_value * 1.5 * (1 - resistance / 100 * 2)
+#                 else:
+#                     score += effect_value * 1.0
+#             elif effect_name == "hp":
+#                 score += effect_value * 0.2  # Diminuer encore le poids des HP
+#             elif effect_name == "defense":
+#                 score += effect_value * 0.5
+#             else:
+#                 score += effect_value
+#         return score
+#
+#     best_item = current_item
+#     best_score = calculate_support_score(
+#         {effect['name']: effect['value'] for effect in current_item.get('effects', [])},
+#         vulnerabilities
+#     )
+#     logging.debug(f"Current equipment: {current_item.get('code', 'None')} with score {best_score}")
+#
+#     for item in equipment_list:
+#         item_effects = {effect['name']: effect['value'] for effect in item.get('effects', [])}
+#         item_score = calculate_support_score(item_effects, vulnerabilities)
+#         logging.debug(f"Evaluating equipment: {item['code']} with score {item_score}")
+#         if item_score > best_score:
+#             best_item = item
+#             best_score = item_score
+#             logging.info(f"Best equipment updated to {best_item['code']} with score {best_score}")
+#
+#     return best_item
+
+
+def select_best_support_equipment(current_item: dict, equipment_list: list[dict], vulnerabilities: dict[str, int], best_weapon: dict) -> dict:
     if not equipment_list:
         return current_item
     if not current_item:
         current_item = equipment_list[0]
 
-    def calculate_support_score(_effects: dict, _vulnerabilities: dict[str, int]) -> float:
+    # Extract weapon elements
+    weapon_effects = {effect['name']: effect['value'] for effect in best_weapon.get('effects', [])}
+    weapon_elements = set()
+    for effect_name in weapon_effects:
+        if effect_name.startswith('attack_'):
+            element = effect_name.replace('attack_', '')
+            weapon_elements.add(element)
+
+    def calculate_support_score(_effects: dict, vulnerabilities: dict[str, int], weapon_elements: set) -> float:
         score = 0.0
         for effect_name, effect_value in _effects.items():
             if effect_name.startswith("dmg_"):
                 element = effect_name.replace("dmg_", "")
-                resistance = _vulnerabilities.get(element, 0)
-                if resistance < 0:
-                    score += effect_value * 4 * (1 + abs(resistance) / 100 * 5)
-                elif resistance > 0:
-                    score += effect_value * 2 * (1 - resistance / 100 * 2)
+                if element in weapon_elements:
+                    resistance = vulnerabilities.get(element, 0)
+                    # Boost score if the support equipment's damage effect matches the weapon's attack element
+                    if resistance < 0:
+                        score += effect_value * 4 * (1 + abs(resistance) / 100 * 5)
+                    elif resistance > 0:
+                        score += effect_value * 2 * (1 - resistance / 100 * 2)
+                    else:
+                        score += effect_value * 1.0
                 else:
-                    score += effect_value * 1.0
+                    # Lesser weight if the element doesn't match the weapon's attack element
+                    score += effect_value * 0.5
             elif effect_name.startswith("res_"):
                 element = effect_name.replace("res_", "")
-                resistance = _vulnerabilities.get(element, 0)
+                resistance = vulnerabilities.get(element, 0)
                 if resistance < 0:
                     score += effect_value * 3 * (1 + abs(resistance) / 100 * 5)
                 elif resistance > 0:
@@ -448,7 +516,7 @@ def select_best_support_equipment(current_item: dict, equipment_list: list[dict]
                 else:
                     score += effect_value * 1.0
             elif effect_name == "hp":
-                score += effect_value * 0.2  # Diminuer encore le poids des HP
+                score += effect_value * 0.2
             elif effect_name == "defense":
                 score += effect_value * 0.5
             else:
@@ -458,13 +526,14 @@ def select_best_support_equipment(current_item: dict, equipment_list: list[dict]
     best_item = current_item
     best_score = calculate_support_score(
         {effect['name']: effect['value'] for effect in current_item.get('effects', [])},
-        vulnerabilities
+        vulnerabilities,
+        weapon_elements
     )
     logging.debug(f"Current equipment: {current_item.get('code', 'None')} with score {best_score}")
 
     for item in equipment_list:
         item_effects = {effect['name']: effect['value'] for effect in item.get('effects', [])}
-        item_score = calculate_support_score(item_effects, vulnerabilities)
+        item_score = calculate_support_score(item_effects, vulnerabilities, weapon_elements)
         logging.debug(f"Evaluating equipment: {item['code']} with score {item_score}")
         if item_score > best_score:
             best_item = item
@@ -487,7 +556,7 @@ async def select_best_equipment_set(current_equipments: dict, sorted_valid_equip
             continue
         current_item = current_equipments.get(slot, {})
         equipment_list = sorted_valid_equipments.get(slot, [])
-        best_item = select_best_support_equipment(current_item, equipment_list, vulnerabilities)
+        best_item = select_best_support_equipment(current_item, equipment_list, vulnerabilities, best_weapon)
         selected_equipments[slot] = best_item
 
     return selected_equipments
@@ -871,7 +940,7 @@ class Character(BaseModel):
             if monster["level"] <= self.max_fight_level
         ]
         # TODO make it dynamic based on real fight capacity
-        self.fightable_monsters = [m for m in fightable_monsters if m['code'] not in ['lich']]
+        self.fightable_monsters = [m for m in fightable_monsters if m['code'] not in EXCLUDED_MONSTERS]
         self.fightable_materials = [
             {item["code"]: item for item in get_items_list_by_type(self.environment.items, "resource")}[drop['code']]
             for monster_details in self.fightable_monsters
@@ -926,7 +995,6 @@ class Character(BaseModel):
         ]
 
         item_objectives.extend(resource_objectives[::-1])
-        # objectives.extend(self.fightable_materials[::-1])
 
         # Filter according to defined craft skills
         item_objectives = [
@@ -1727,7 +1795,7 @@ class Character(BaseModel):
             game_task = await self.get_game_task()
 
         # If task is too difficult, change
-        while game_task.code in ["cultist_acolyte", "cultist_emperor", "lich", "bat"]:
+        while game_task.code in EXCLUDED_MONSTERS:
             if await self.get_inventory_quantity("tasks_coin") == 0:
                 await self.withdraw_items_from_bank({"tasks_coin": 1})
             await self.move_to_task_master()
