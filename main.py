@@ -372,7 +372,7 @@ async def get_all_monsters(session: aiohttp.ClientSession, params: dict = None) 
     return {elt["code"]: elt for elt in data["data"]} if data else {}
 
 
-async def get_all_items(session: aiohttp.ClientSession, params: dict = None) -> list[dict]:
+async def get_all_items(session: aiohttp.ClientSession, params: dict = None) -> dict[str, dict]:
     if params is None:
         params = {}
     items = []
@@ -390,7 +390,7 @@ async def get_all_items(session: aiohttp.ClientSession, params: dict = None) -> 
             page += 1
         else:
             break
-    return items
+    return {item['code']: item for item in items}
 
 
 async def get_dropping_resource_locations(session: aiohttp.ClientSession, _material_code: str) -> dict:
@@ -2178,27 +2178,26 @@ async def main():
 
         items_data, monsters_data, resources_data, maps_data, status = await asyncio.gather(*tasks)
 
-        items = {item['code']: item for item in items_data}
-
         environment = Environment(
-            items=items,
+            items=items_data,
             monsters=monsters_data,
             resource_locations=resources_data,
             maps=maps_data,
             status=status
         )
 
-        obsolete_equipments = await get_obsolete_equipments(session, items)
+        obsolete_equipments = await get_obsolete_equipments(session, items_data)
 
         # LOCAL_BANK = await get_bank_items(session)
 
         # Lich 96% > cursed_specter, gold_shield, cursed_hat, malefic_armor, piggy_pants, gold_boots, ruby_ring, ruby_ring, ruby_amulet
         # Lich 100% > cursed_specter, gold_shield, cursed_hat, malefic_armor, piggy_pants, gold_boots, ruby_ring, ruby_ring, magic_stone_amulet
+        # Lich > gold_sword, gold_shield, lich_crown, obsidian_armor, gold_platelegs, lizard_boots, dreadful_ring, topaz_ring, topaz_amulet
 
         # Test filter
         given_items = [
             item
-            for item in items.values()
+            for item in items_data.values()
             if environment.is_item_given(item)
         ]
         logging.warning(f"Equipments that can only be given or dropped: {list(map(lambda x: x['code'], given_items))}")
