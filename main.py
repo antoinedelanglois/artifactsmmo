@@ -2055,9 +2055,17 @@ class Character(BaseModel):
 
     async def get_fight_for_leveling_up_task(self) -> Task:
         # If XP can be gained by fighting, go
-        if len(self.fight_objectives) > 0:
+
+        # Remove event monsters
+        fight_objectives = [
+            f
+            for f in self.fight_objectives
+            if f['code'] not in ["demon", "bandit_lizard", "cultist_emperor", "rosenblood"]
+        ]
+
+        if len(fight_objectives) > 0:
             # FIXME check if monster is reachable (example: 'demon' only available during events)
-            highest_fightable_monster = self.fight_objectives[0]
+            highest_fightable_monster = fight_objectives[0]
             return Task(
                 code=highest_fightable_monster['code'],
                 type=TaskType.MONSTERS,
