@@ -1433,29 +1433,57 @@ class Character(BaseModel):
                 await self.deposit_items_at_bank({current_equipment_code: 1})
             await self.equip(_equipment_code, _equipment_slot)
 
-    async def equip_for_gathering(self, _item_code: str):
-        item_infos = self.environment.items.get(_item_code, {})
-        if item_infos.get("subtype", None) is None:
+    async def equip_for_gathering(self, gathering_skill: str):
+        """
+        Equip the best available equipment for gathering based on the gathering skill.
+
+        Args:
+            gathering_skill (str): The gathering skill
+        """
+        # Get the list of equipments from the bank for the 'weapon' slot
+        bank_equipments = await self.get_bank_equipments_for_slot('weapon')
+
+        # Filter equipments that have effects matching the gathering skill
+        valid_equipments = []
+        for equipment in bank_equipments:
+            for effect in equipment.get('effects', []):
+                if effect['name'] == gathering_skill:
+                    valid_equipments.append(equipment)
+                    break  # No need to check other effects
+
+        if not valid_equipments:
+            self._logger.info(f"No valid equipment found for gathering skill {gathering_skill}")
             return
 
-        # TODO check available equipements with "effects" > "name" == "gathering_skill"
+        # Ensure equipments are valid for the character's level
+        valid_equipments = [
+            equipment for equipment in valid_equipments
+            if await self.is_valid_equipment(equipment)
+        ]
 
-        if item_infos["subtype"] == "mining":
-            pick_tool = "iron_pickaxe"
-            if await get_bank_item_qty(self.session, "gold_pickaxe") >= 1:
-                pick_tool = "gold_pickaxe"
-            await self.go_and_equip("weapon", pick_tool)
-        elif item_infos["subtype"] == "woodcutting":
-            axe_tool = "iron_axe"
-            if await get_bank_item_qty(self.session, "gold_axe") >= 1:
-                axe_tool = "gold_axe"
-            await self.go_and_equip("weapon", axe_tool)
-        elif item_infos["subtype"] == "fishing":
-            fish_tool = "spruce_fishing_rod"
-            if await get_bank_item_qty(self.session, "gold_fishing_rod") >= 1:
-                fish_tool = "gold_fishing_rod"
-            await self.go_and_equip("weapon", fish_tool)
-        return
+        if not valid_equipments:
+            self._logger.info(f"No valid equipment found for gathering skill {gathering_skill} at character's level")
+            return
+
+        # Sort equipments based on the effect value for the gathering skill
+        def get_effect_value(_equipment, effect_name):
+            for _effect in _equipment.get('effects', []):
+                if _effect['name'] == effect_name:
+                    return _effect['value']
+            return 0
+
+        # Adjusted sorting: sort in ascending order since more negative is better
+        valid_equipments.sort(
+            key=lambda eq: get_effect_value(eq, gathering_skill),
+            reverse=False
+        )
+
+        # Select the best equipment
+        best_equipment = valid_equipments[0]
+        self._logger.debug(f"Selected best equipment {best_equipment['code']} for gathering skill {gathering_skill}")
+
+        # Equip the best equipment
+        await self.go_and_equip("weapon", best_equipment['code'])
 
     async def gather_and_collect(self, _craft_details: dict[str, dict[str, int]]):
         fight_details = _craft_details['fight']
@@ -1466,7 +1494,7 @@ class Character(BaseModel):
                 await self.equip_for_fight(monster)
                 await self.go_and_fight_to_collect(item_code, qty)
         for item_code, qty in _craft_details['gather'].items():
-            await self.equip_for_gathering(item_code)
+            await self.equip_for_gathering(self.environment.items[item_code]["subtype"])
             await self.gather_material(item_code, qty)
         collect_details = _craft_details['collect']
         if sum([qty for _, qty in collect_details.items()]) > 0:
@@ -2015,10 +2043,12 @@ class Character(BaseModel):
 
     async def equip_for_task(self):
 
-        if self.task.type == TaskType.MONSTERS:     # FIXME event is not necessarily fight
+        if self.task.type == TaskType.MONSTERS:
+            self._logger.debug("Equipping for fight")
             await self.equip_for_fight()
         elif self.task.type == TaskType.RESOURCES:
-            await self.equip_for_gathering(self.task.code)
+            self._logger.debug("Equipping for gathering")
+            await self.equip_for_gathering(self.task.details["skill"])
 
     async def get_recycling_task(self) -> Task:
 
@@ -2101,12 +2131,13 @@ class Character(BaseModel):
     async def get_event_task(self) -> Task:
         all_events = await get_all_events(self.session)
         # TODO we need prioritization of events
+        eligible_tasks = []
         for event in all_events:
             if event["name"] in ["Bandit Camp", "Portal"]:
                 monster_code = event["map"]["content"]["code"]
                 monster_details = self.environment.monsters[monster_code]
                 monster_details['location'] = (event["map"]["x"], event["map"]["y"])
-                return Task(
+                monster_task = Task(
                     code=monster_code,
                     type=TaskType.MONSTERS,
                     total=99,   # FIXME when does it stop?
@@ -2115,12 +2146,13 @@ class Character(BaseModel):
                     y=event["map"]["y"],
                     is_event=True
                 )
+                eligible_tasks.append(monster_task)
             if event["name"] in ["Magic Apparition", "Strange Apparition"]:
                 resource_code = event["map"]["content"]["code"]
                 resource_details = self.environment.resource_locations[resource_code]
                 if await self.get_skill_level(resource_details["skill"]) >= resource_details["level"]:
                     resource_details['location'] = (event["map"]["x"], event["map"]["y"])
-                    return Task(
+                    gathering_task = Task(
                         code=resource_code,
                         type=TaskType.RESOURCES,
                         total=99,   # FIXME when does it stop?
@@ -2129,6 +2161,11 @@ class Character(BaseModel):
                         y=event["map"]["y"],
                         is_event=True
                     )
+                    eligible_tasks.append(gathering_task)
+
+        if len(eligible_tasks) > 0:
+            return eligible_tasks[-1]
+
         return None
 
 
