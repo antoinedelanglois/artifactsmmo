@@ -2115,7 +2115,7 @@ class Character(BaseModel):
                     y=event["map"]["y"],
                     is_event=True
                 )
-            if event["name"] in ["Strange Apparition"]:
+            if event["name"] in ["Magic Apparition", "Strange Apparition"]:
                 resource_code = event["map"]["content"]["code"]
                 resource_details = self.environment.resource_locations[resource_code]
                 if await self.get_skill_level(resource_details["skill"]) >= resource_details["level"]:
