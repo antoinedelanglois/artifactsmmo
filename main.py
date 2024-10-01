@@ -2297,11 +2297,11 @@ async def main():
         logging.warning(f"Equipments that can only be given or dropped: {list(map(lambda x: x['code'], given_items))}")
 
         characters_ = [
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Kersh', max_fight_level=30, skills=['weaponcrafting', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Capu', max_fight_level=30, skills=['gearcrafting', 'woodcutting', 'mining']),  # 'gearcrafting',
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Brubu', max_fight_level=30, skills=['woodcutting', 'mining']),  # , 'fishing', 'mining', 'woodcutting'
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Crabex', max_fight_level=30, skills=['jewelrycrafting', 'woodcutting', 'mining']),  # 'jewelrycrafting', 'woodcutting'
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='JeaGa', max_fight_level=30, skills=['mining', 'woodcutting']),  # 'cooking', 'fishing'
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Kersh', max_fight_level=30, skills=['cooking', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Capu', max_fight_level=30, skills=['woodcutting', 'mining']),  # 'gearcrafting',
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Brubu', max_fight_level=30, skills=['gearcrafting', 'woodcutting', 'mining']),  # , 'fishing', 'mining', 'woodcutting'
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Crabex', max_fight_level=30, skills=['mining', 'woodcutting']),  # 'jewelrycrafting', 'woodcutting', 'mining'
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='JeaGa', max_fight_level=30, skills=['jewelrycrafting', 'mining', 'woodcutting']),  # 'cooking', 'fishing'
         ]
 
         # Initialize all characters asynchronously
