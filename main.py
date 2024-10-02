@@ -2298,10 +2298,10 @@ async def main():
 
         characters_ = [
             Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Kersh', max_fight_level=30, skills=['cooking', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Capu', max_fight_level=30, skills=['woodcutting', 'mining']),  # 'gearcrafting',
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Brubu', max_fight_level=30, skills=['gearcrafting', 'woodcutting', 'mining']),  # , 'fishing', 'mining', 'woodcutting'
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Capu', max_fight_level=30, skills=['mining']),  # 'gearcrafting',
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Brubu', max_fight_level=30, skills=['gearcrafting', 'woodcutting']),  # , 'fishing', 'mining', 'woodcutting'
             Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Crabex', max_fight_level=30, skills=['mining', 'woodcutting']),  # 'jewelrycrafting', 'woodcutting', 'mining'
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='JeaGa', max_fight_level=30, skills=['jewelrycrafting', 'mining', 'woodcutting']),  # 'cooking', 'fishing'
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='JeaGa', max_fight_level=30, skills=['cooking', 'fishing']),  # 'cooking', 'fishing'
         ]
 
         # Initialize all characters asynchronously
