@@ -1878,7 +1878,10 @@ class Character(BaseModel):
         )
 
     async def get_best_objective(self):
-        return self.objectives[0]
+        await self.set_objectives()
+        if len(self.objectives) > 0:
+            return self.objectives[0]
+        return self.environment.items["egg"]
 
     async def set_task(self, item: dict, task_type: TaskType, quantity: int):
         total_nb_materials = sum([qty for _, qty in get_craft_recipee(item).items()])
@@ -2298,10 +2301,10 @@ async def main():
 
         characters_ = [
             Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Kersh', max_fight_level=30, skills=['cooking', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Capu', max_fight_level=30, skills=['mining']),  # 'gearcrafting',
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Brubu', max_fight_level=30, skills=['gearcrafting', 'woodcutting']),  # , 'fishing', 'mining', 'woodcutting'
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Capu', max_fight_level=30, skills=['gearcrafting', 'woodcutting', 'mining']),  # 'gearcrafting',
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Brubu', max_fight_level=30, skills=['cooking', 'woodcutting', 'mining']),  # , 'fishing', 'mining', 'woodcutting'
             Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Crabex', max_fight_level=30, skills=['mining', 'woodcutting']),  # 'jewelrycrafting', 'woodcutting', 'mining'
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='JeaGa', max_fight_level=30, skills=['cooking', 'fishing']),  # 'cooking', 'fishing'
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='JeaGa', max_fight_level=30, skills=['jewelrycrafting', 'mining', 'woodcutting']),  # 'cooking', 'fishing'
         ]
 
         # Initialize all characters asynchronously
