@@ -2194,7 +2194,7 @@ async def run_bot(character_object: Character):
         if event_task is not None:
             character_object.task = event_task
         # No need to do game tasks if already a lot of task coins
-        elif await character_object.is_feasible_task(game_task) and (await get_bank_item_qty(character_object.session, "tasks_coin") < 100):
+        elif (await character_object.is_feasible_task(game_task) and (await get_bank_item_qty(character_object.session, "tasks_coin") < 100)) or len(character_object.objectives) == 0:
             character_object.task = game_task
         elif recycling_task is not None:
             character_object.task = recycling_task
@@ -2300,7 +2300,7 @@ async def main():
         logging.warning(f"Equipments that can only be given or dropped: {list(map(lambda x: x['code'], given_items))}")
 
         characters_ = [
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Kersh', max_fight_level=30, skills=['cooking', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Kersh', max_fight_level=30, skills=['weaponcrafting', 'cooking', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
             Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Capu', max_fight_level=30, skills=['gearcrafting', 'woodcutting', 'mining']),  # 'gearcrafting',
             Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Brubu', max_fight_level=30, skills=['cooking', 'woodcutting', 'mining']),  # , 'fishing', 'mining', 'woodcutting'
             Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Crabex', max_fight_level=30, skills=['mining', 'woodcutting']),  # 'jewelrycrafting', 'woodcutting', 'mining'
