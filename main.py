@@ -1881,7 +1881,7 @@ class Character(BaseModel):
         await self.set_objectives()
         if len(self.objectives) > 0:
             return self.objectives[0]
-        return self.environment.items["egg"]
+        return self.environment.items["iron"]
 
     async def set_task(self, item: dict, task_type: TaskType, quantity: int):
         total_nb_materials = sum([qty for _, qty in get_craft_recipee(item).items()])
