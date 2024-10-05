@@ -1417,7 +1417,7 @@ class Character(BaseModel):
         }
 
         # SECURITY CHECK ON RARE ITEMS
-        if 'jasper_crystal' in get_craft_recipee(item).keys():
+        if 'jasper_crystal' in get_craft_recipee(item).keys() or 'magical_cure' in get_craft_recipee(item).keys():
             self._logger.warning(f' Item {item["code"]} is rare so better not to recycle it.')
             return 0
 
