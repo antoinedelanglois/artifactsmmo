@@ -35,6 +35,142 @@ EQUIPMENTS_TYPES = ['weapon', 'shield', 'helmet', 'body_armor', 'leg_armor', 'bo
 EXCLUDED_MONSTERS = ["cultist_acolyte", "cultist_emperor", "lich", "bat"]
 
 
+class Craft(BaseModel):
+    skill: str
+    level: int
+    items: list
+
+
+class Effect(BaseModel):
+    name: str
+    value: int
+
+
+class Ge(BaseModel):
+    code: str
+    stock: int
+    sell_price: int
+    buy_price: int
+    max_quantity: int
+
+
+class Drop(BaseModel):
+    code: str
+    rate: int
+    min_quantity: int
+    max_quantity: int
+
+
+class Monster(BaseModel):
+    name: str
+    code: str
+    level: int
+    hp: int
+    attack_fire: int
+    attack_earth: int
+    attack_water: int
+    attack_air: int
+    res_fire: int
+    res_earth: int
+    res_water: int
+    res_air: int
+    min_gold: int
+    max_gold: int
+    drops: list[Drop]
+
+    def get_vulnerabilities(self) -> dict[str, int]:
+        vulnerabilities = {
+            'fire': self.res_fire,
+            'earth': self.res_earth,
+            'water': self.res_water,
+            'air': self.res_air
+        }
+
+        # FIXME
+        if self.code == 'bandit_lizard':
+            vulnerabilities = {"water": 5}
+
+        return vulnerabilities
+
+    def is_event(self) -> bool:
+        return self.code in ["demon", "bandit_lizard", "cultist_emperor", "rosenblood"]
+
+
+class Resource(BaseModel):
+    name: str
+    code: str
+    skill: str
+    level: int
+    drops: list[Drop]
+
+
+class Item(BaseModel):
+    name: str
+    code: str
+    level: int
+    type: str
+    subtype: str
+    description: str
+    effects: list[Effect] = Field(default_factory=list)
+    craft: Optional[Craft] = None
+    ge: Optional[Ge] = None
+
+    def is_gatherable(self) -> bool:
+        return self.craft is None and self.type == "resource" and self.subtype in ["mining", "woodcutting", "fishing"]
+
+    def is_from_task(self) -> bool:
+        return self.type == "resource" and self.subtype == "task"
+
+    def is_rare_drop(self) -> bool:
+        # TODO get it dynamic through the drop rate ?
+        return self.code in ['topaz', 'emerald', 'ruby', 'sapphire', 'sap', 'magic_sap', 'diamond']
+
+    def is_dropped(self) -> bool:
+        return self.type == "resource" and self.subtype in ["mob", "food"]
+
+    def is_crafted(self) -> bool:
+        return self.craft is not None
+
+    def is_equipment(self) -> bool:
+        return self.type in EQUIPMENTS_TYPES
+
+    def is_consumable(self) -> bool:
+        craft = self.craft
+        if craft is None:
+            return False
+        return self.craft.skill in ['cooking']
+
+    def is_given(self) -> bool:
+        return self.is_dropped() or self.is_from_task() or self.type in ["currency"] or self.code == "wooden_stick"
+
+    def get_min_stock_qty(self) -> int:     # TODO get it as a post init attribute?
+        if self.type == "ring":
+            return 10
+        return 5
+
+    def is_protected_consumable(self) -> bool:
+        # if any(["boost" in effect["name"] for effect in cooked_consumable['effects']])
+        return self.is_consumable()
+
+    def is_not_recyclable(self) -> bool:
+        return self.craft and self.craft.skill in ['woodcutting', 'mining', 'cooking']
+
+    def is_valid_equipment(self, character_level: int) -> bool:
+        return character_level >= self.level
+
+    def get_sell_price(self) -> int:
+        # TODO adapt code to get updated price
+        return self.ge.sell_price
+
+    def is_protected(self) -> bool:
+        return self.is_from_task() or self.is_rare_drop()
+
+    def is_skill_compliant(self, skill_names: list[str]) -> bool:
+        is_craft_skill_compliant = self.craft and self.craft.skill in skill_names
+        is_gathering_skill_compliant = self.type == 'resource' and self.subtype in skill_names
+        return is_craft_skill_compliant or is_gathering_skill_compliant
+
+
 def handle_incorrect_status_code(_status_code: int) -> str:
     match _status_code:
         case 404: msg = "Item not found"
@@ -138,28 +274,28 @@ def extract_cooldown_time(message):
     return None
 
 
-def get_items_list_by_type(_items: dict[str, dict], _item_type: str) -> list[dict]:
+def get_items_list_by_type(_items: dict[str, Item], _item_type: str) -> list[Item]:
     return [
         item
         for _, item in _items.items()
-        if item["type"] == _item_type
+        if item.type == _item_type
     ]
 
 
-def get_equipments_by_type(_items: dict[str, dict]) -> dict[str, list[dict]]:
+def get_equipments_by_type(_items: dict[str, Item]) -> dict[str, list[Item]]:
     return {
         equipment_type: get_items_list_by_type(_items, equipment_type)
         for equipment_type in EQUIPMENTS_TYPES
     }
 
 
-def is_equipment_better(equipment_a: dict, equipment_b: dict) -> bool:
+def is_equipment_better(equipment_a: Item, equipment_b: Item) -> bool:
     """
     Returns True if equipment_a is strictly better than equipment_b.
     """
     # Parse effects into dictionaries
-    effects_a = {effect['name']: effect['value'] for effect in equipment_a.get('effects', [])}
-    effects_b = {effect['name']: effect['value'] for effect in equipment_b.get('effects', [])}
+    effects_a = {effect.name: effect.value for effect in equipment_a.effects}
+    effects_b = {effect.name: effect.value for effect in equipment_b.effects}
 
     # Get the union of all effect names
     all_effects = set(effects_a.keys()) | set(effects_b.keys())
@@ -183,12 +319,12 @@ def is_equipment_better(equipment_a: dict, equipment_b: dict) -> bool:
     return better_or_equal_in_all and strictly_better_in_at_least_one
 
 
-def identify_obsolete_equipments(equipment_groups: dict[str, list[dict]]) -> list[dict]:
+def identify_obsolete_equipments(equipment_groups: dict[str, list[Item]]) -> list[Item]:
     obsolete_equipments = []
     for equipment_type, equipments in equipment_groups.items():
         # Sort equipments by level and effects
         equipments_sorted = sorted(equipments, key=lambda e: (
-            -sum(effect['value'] for effect in e.get('effects', []))  # Higher total effects first
+            -sum(effect.value for effect in e.effects)  # Higher total effects first
         ))
         # Keep track of the best equipments seen so far
         best_equipments = []
@@ -205,7 +341,7 @@ def identify_obsolete_equipments(equipment_groups: dict[str, list[dict]]) -> lis
     return obsolete_equipments
 
 
-async def get_obsolete_equipments(session: ClientSession, _items: dict[str, dict]) -> dict[str, dict]:
+async def get_obsolete_equipments(session: ClientSession, _items: dict[str, Item]) -> dict[str, Item]:
     equipment_groups = get_equipments_by_type(_items)
 
     # Récupérer les quantités des items une seule fois
@@ -217,12 +353,12 @@ async def get_obsolete_equipments(session: ClientSession, _items: dict[str, dict
         filtered_equipments = []
         for equipment in equipments:
             # Seulement si la quantité minimale est disponible
-            if total_quantities.get(equipment['code'], 0) >= get_min_stock_qty(equipment):
+            if total_quantities.get(equipment.code, 0) >= equipment.get_min_stock_qty():
                 filtered_equipments.append(equipment)
         map_equipments[equipment_type] = filtered_equipments
 
     obsolete_equipments = identify_obsolete_equipments(map_equipments)
-    return {equipment['code']: equipment for equipment in obsolete_equipments}
+    return {equipment.code: equipment for equipment in obsolete_equipments}
 
 
 async def get_all_items_quantities(session: ClientSession) -> dict[str, int]:
@@ -258,10 +394,10 @@ async def get_all_items_quantities(session: ClientSession) -> dict[str, int]:
     return total_quantities
 
 
-async def needs_stock(session: ClientSession, _item: dict, total_quantities: dict[str, int] = None) -> bool:
+async def needs_stock(session: ClientSession, _item: Item, total_quantities: dict[str, int] = None) -> bool:
     if total_quantities is None:
         total_quantities = await get_all_items_quantities(session)
-    return await get_all_map_item_qty(session, _item, total_quantities) < get_min_stock_qty(_item)
+    return await get_all_map_item_qty(session, _item, total_quantities) < _item.get_min_stock_qty()
 
 
 async def get_bank_items(session: ClientSession, params: dict = None) -> dict:
@@ -297,11 +433,11 @@ async def get_bank_item_qty(session: ClientSession, _item_code: str) -> int:
     return res.get(_item_code, 0)
 
 
-def get_craft_recipee(_item: dict) -> dict[str, int]:
-    if _item.get('craft', None) is not None:
-        return {m['code']: m['quantity'] for m in _item['craft']['items']}
-    logging.error(f'This material {_item["code"]} is not craftable')
-    return {_item["code"]: 1}
+def get_craft_recipee(_item: Item) -> dict[str, int]:
+    if _item.craft is not None:
+        return {m['code']: m['quantity'] for m in _item.craft.items}
+    logging.error(f'This material {_item.code} is not craftable')
+    return {_item.code: 1}
 
 
 async def get_all_events(session: ClientSession, params: dict = None) -> list[dict]:
@@ -340,19 +476,19 @@ async def get_my_characters(session: ClientSession) -> list:
     return data["data"] if data else []
 
 
-async def get_all_map_item_qty(session: ClientSession, _item: dict, total_quantities: dict[str, int] = None) -> int:
+async def get_all_map_item_qty(session: ClientSession, _item: Item, total_quantities: dict[str, int] = None) -> int:
     if total_quantities is None:
         total_quantities = await get_all_items_quantities(session)
-    return total_quantities.get(_item["code"], 0)
+    return total_quantities.get(_item.code, 0)
 
 
-def get_min_stock_qty(item: dict) -> int:
-    if item["type"] == "ring":
+def get_min_stock_qty(item: Item) -> int:
+    if item.type == "ring":
         return 10
     return 5
 
 
-async def get_all_resources(session: ClientSession, params: dict = None) -> dict[str, dict]:
+async def get_all_resources(session: ClientSession, params: dict = None) -> dict[str, Resource]:
     """
     Retrieves all resources from the API.
     Returns a list of resources with their details.
@@ -363,10 +499,10 @@ async def get_all_resources(session: ClientSession, params: dict = None) -> dict
         url=f"{SERVER}/resources/",
         params=params if params else {}
     )
-    return {elt["code"]: elt for elt in data["data"]} if data else {}
+    return {elt["code"]: Resource(**elt) for elt in data["data"]} if data else {}
 
 
-async def get_all_monsters(session: ClientSession, params: dict = None) -> dict[str, dict]:
+async def get_all_monsters(session: ClientSession, params: dict = None) -> dict[str, Monster]:
     """
     Retrieves all resources from the API.
     Returns a list of resources with their details.
@@ -377,10 +513,10 @@ async def get_all_monsters(session: ClientSession, params: dict = None) -> dict[
         url=f"{SERVER}/monsters/",
         params=params if params else {}
     )
-    return {elt["code"]: elt for elt in data["data"]} if data else {}
+    return {elt["code"]: Monster(**elt) for elt in data["data"]} if data else {}
 
 
-async def get_all_items(session: ClientSession, params: dict = None) -> dict[str, dict]:
+async def get_all_items(session: ClientSession, params: dict = None) -> dict[str, Item]:
     if params is None:
         params = {}
     items = []
@@ -394,115 +530,52 @@ async def get_all_items(session: ClientSession, params: dict = None) -> dict[str
             params=params
         )
         if data and data["data"]:
-            items.extend(data["data"])
+            items.extend([Item(**item_data) for item_data in data["data"]])
             page += 1
         else:
             break
-    return {item['code']: item for item in items}
+    return {item.code: item for item in items}
 
 
-async def get_dropping_resource_locations(session: ClientSession, _material_code: str) -> dict:
+async def get_dropping_resource_locations(session: ClientSession, _material_code: str) -> Resource:
     resources_locations = [
         loc for loc in (await get_all_resources(session)).values()
-        if _material_code in [x['code'] for x in loc['drops']]
+        if _material_code in [x.code for x in loc.drops]
     ]
     if resources_locations:
-        best_location = min(resources_locations, key=lambda x: x['level'])
+        best_location = min(resources_locations, key=lambda x: x.level)
         return best_location
 
-    # Return a default or error location if no match is found
-    return {
+    # FIXME Return a default or error location if no match is found
+    return Resource(**{
         "name": "Unknown Location",
         "code": "unknown_location",
         "skill": 'N/A',
         "level": 0,
         "drops": []
-    }
-
-
-async def get_monster_vulnerabilities(monster_infos: dict) -> dict[str, int]:
-    vulnerabilities = {}
-    for element in ["fire", "earth", "water", "air"]:
-        res_key = f"res_{element}"
-        res_value = monster_infos.get(res_key, 0)
-        vulnerabilities[element] = res_value
-    return vulnerabilities
-
-
-# def select_best_support_equipment(current_item: dict, equipment_list: list[dict],
-# vulnerabilities: dict[str, int]) -> dict:
-#     if not equipment_list:
-#         return current_item
-#     if not current_item:
-#         current_item = equipment_list[0]
-#
-#     def calculate_support_score(_effects: dict, _vulnerabilities: dict[str, int]) -> float:
-#         score = 0.0
-#         for effect_name, effect_value in _effects.items():
-#             if effect_name.startswith("dmg_"):
-#                 element = effect_name.replace("dmg_", "")
-#                 resistance = _vulnerabilities.get(element, 0)
-#                 if resistance < 0:
-#                     score += effect_value * 4 * (1 + abs(resistance) / 100 * 5)
-#                 elif resistance > 0:
-#                     score += effect_value * 2 * (1 - resistance / 100 * 2)
-#                 else:
-#                     score += effect_value * 1.0
-#             elif effect_name.startswith("res_"):
-#                 element = effect_name.replace("res_", "")
-#                 resistance = _vulnerabilities.get(element, 0)
-#                 if resistance < 0:
-#                     score += effect_value * 3 * (1 + abs(resistance) / 100 * 5)
-#                 elif resistance > 0:
-#                     score += effect_value * 1.5 * (1 - resistance / 100 * 2)
-#                 else:
-#                     score += effect_value * 1.0
-#             elif effect_name == "hp":
-#                 score += effect_value * 0.2  # Diminuer encore le poids des HP
-#             elif effect_name == "defense":
-#                 score += effect_value * 0.5
-#             else:
-#                 score += effect_value
-#         return score
-#
-#     best_item = current_item
-#     best_score = calculate_support_score(
-#         {effect['name']: effect['value'] for effect in current_item.get('effects', [])},
-#         vulnerabilities
-#     )
-#     logging.debug(f"Current equipment: {current_item.get('code', 'None')} with score {best_score}")
-#
-#     for item in equipment_list:
-#         item_effects = {effect['name']: effect['value'] for effect in item.get('effects', [])}
-#         item_score = calculate_support_score(item_effects, vulnerabilities)
-#         logging.debug(f"Evaluating equipment: {item['code']} with score {item_score}")
-#         if item_score > best_score:
-#             best_item = item
-#             best_score = item_score
-#             logging.info(f"Best equipment updated to {best_item['code']} with score {best_score}")
-#
-#     return best_item
+    })
 
 
 def select_best_support_equipment(
-        current_item: dict,
-        equipment_list: list[dict],
+        current_item: Optional[Item],
+        equipment_list: list[Item],
         vulnerabilities: dict[str, int],
-        best_weapon: dict
-) -> dict:
+        best_weapon: Item
+) -> Optional[Item]:
     if not equipment_list:
         return current_item
     if not current_item:
         current_item = equipment_list[0]
 
     # Extract weapon elements
-    weapon_effects = {effect['name']: effect['value'] for effect in best_weapon.get('effects', [])}
+    weapon_effects = {effect.name: effect.value for effect in best_weapon.effects}
     weapon_elements = set()
     for effect_name in weapon_effects:
         if effect_name.startswith('attack_'):
             element = effect_name.replace('attack_', '')
             weapon_elements.add(element)
 
+    # TODO _effects to change to list[Effect]
     def calculate_support_score(_effects: dict, _vulnerabilities: dict[str, int], _weapon_elements: set) -> float:
         score = 0.0
         for _effect_name, effect_value in _effects.items():
@@ -539,34 +612,34 @@ def select_best_support_equipment(
 
     best_item = current_item
     best_score = calculate_support_score(
-        {effect['name']: effect['value'] for effect in current_item.get('effects', [])},
+        {effect.name: effect.value for effect in current_item.effects},
         vulnerabilities,
         weapon_elements
     )
-    logging.debug(f"Current equipment: {current_item.get('code', 'None')} with score {best_score}")
+    logging.debug(f"Current equipment: {current_item.code} with score {best_score}")
 
     for item in equipment_list:
-        item_effects = {effect['name']: effect['value'] for effect in item.get('effects', [])}
+        item_effects = {effect.name: effect.value for effect in current_item.effects}
         item_score = calculate_support_score(item_effects, vulnerabilities, weapon_elements)
-        logging.debug(f"Evaluating equipment: {item['code']} with score {item_score}")
+        logging.debug(f"Evaluating equipment: {item.code} with score {item_score}")
         if item_score > best_score:
             best_item = item
             best_score = item_score
-            logging.info(f"Best equipment updated to {best_item['code']} with score {best_score}")
+            logging.info(f"Best equipment updated to {best_item.code} with score {best_score}")
 
     return best_item
 
 
 async def select_best_equipment_set(
-        current_equipments: dict,
-        sorted_valid_equipments: dict[str, list[dict]],
+        current_equipments: dict[str, Item],
+        sorted_valid_equipments: dict[str, list[Item]],
         vulnerabilities: dict
-) -> dict[str, dict]:
+) -> dict[str, Item]:
     selected_equipments = {}
 
     # Sélectionner la meilleure arme (code existant)
     best_weapon = select_best_weapon(
-        current_equipments.get('weapon', {}),
+        current_equipments.get('weapon', None),       # FIXME None is not a valid Item
         sorted_valid_equipments.get('weapon', []),
         vulnerabilities
     )
@@ -584,7 +657,7 @@ async def select_best_equipment_set(
     return selected_equipments
 
 
-def select_best_weapon(current_weapon: dict, weapon_list: list[dict], vulnerabilities: dict[str, int]) -> dict:
+def select_best_weapon(current_weapon: Item, weapon_list: list[Item], vulnerabilities: dict[str, int]) -> Item:
     """
     Selects the best weapon based on vulnerabilities.
     """
@@ -621,39 +694,40 @@ def select_best_weapon(current_weapon: dict, weapon_list: list[dict], vulnerabil
 
     best_weapon = current_weapon
     best_score = calculate_weapon_score(
-        {effect['name']: effect['value'] for effect in current_weapon.get('effects', [])},
+        {effect.name: effect.value for effect in current_weapon.effects},
         vulnerabilities
     )
 
     for weapon in weapon_list:
-        weapon_effects = {effect['name']: effect['value'] for effect in weapon.get('effects', [])}
+        weapon_effects = {effect.name: effect.value for effect in weapon.effects}
         weapon_score = calculate_weapon_score(weapon_effects, vulnerabilities)
         if weapon_score > best_score:
             best_weapon = weapon
             best_score = weapon_score
-            logging.debug(f"Best weapon updated to {best_weapon['code']} with score {best_score}'")
+            logging.debug(f"Best weapon updated to {best_weapon.code} with score {best_score}'")
 
     return best_weapon
 
 
 async def select_best_equipment(
-        equipment1_infos: dict,
-        sorted_valid_equipments: list[dict],
+        equipment1: Item,
+        sorted_valid_equipments: list[Item],
         vulnerabilities: dict[str, int]
-) -> dict:
+) -> Item:
     """
     Selects the best equipment based on monster vulnerability and equipment effects.
 
-    :param equipment1_infos: The currently equipped item information (or empty dict if none equipped).
+    :param equipment1: The currently equipped item information (or empty dict if none equipped).
     :param sorted_valid_equipments: A list of valid equipment items sorted by level.
     :param vulnerabilities: The monster's elemental vulnerabilities (e.g., 'fire', 'water').
     :return: The selected best equipment.
     """
     if len(sorted_valid_equipments) == 0:
-        return equipment1_infos
-    if not equipment1_infos:
+        return equipment1
+    if not equipment1:
         return sorted_valid_equipments[0]
 
+    # TODO use list[Effect] for _effects
     def calculate_effect_score(_effects: dict, _vulnerabilities: dict[str, int]) -> int:
         """
         Calculate the equipment score based on the effects, giving more weight to the monster's vulnerability.
@@ -694,21 +768,21 @@ async def select_best_equipment(
             score += total_attack * 2  # Additional weight for total attack
         return score
 
-    best_equipment = equipment1_infos
+    best_equipment = equipment1
     best_score = calculate_effect_score(
-        {effect['name']: effect['value'] for effect in equipment1_infos.get('effects', [])},
+        {effect.name: effect.value for effect in equipment1.effects},
         vulnerabilities
     )
 
-    for equipment2_infos in sorted_valid_equipments:
-        equipment2_effects = {effect['name']: effect['value'] for effect in equipment2_infos.get('effects', [])}
+    for equipment2 in sorted_valid_equipments:
+        equipment2_effects = {effect.name: effect.value for effect in equipment2.effects}
         equipment2_score = calculate_effect_score(equipment2_effects, vulnerabilities)
 
         # Compare scores and select the best
         if equipment2_score > best_score:
-            best_equipment = equipment2_infos
+            best_equipment = equipment2
             best_score = equipment2_score
-            logging.debug(f"Best equipment updated to {best_equipment['code']} with score {best_score}'")
+            logging.debug(f"Best equipment updated to {best_equipment.code} with score {best_score}'")
 
     return best_equipment
 
@@ -725,10 +799,29 @@ class Task(BaseModel):
     code: str = ""
     type: TaskType = TaskType.IDLE
     total: int = 0
-    details: dict = None
+    details: Item | Monster | Resource = None
     x: int = 0,
     y: int = 0,
     is_event: bool = False
+
+    def is_craft_type(self):
+        return self.type == TaskType.ITEMS
+
+    def is_fight_type(self):
+        return self.type == TaskType.MONSTERS
+
+    def is_gather_type(self):
+        return self.type == TaskType.RESOURCES
+
+    # TODO get max_fight_level from character_infos?
+    def is_feasible(self, character_infos: dict, max_fight_level: int) -> bool:
+        if self.is_fight_type() and self.details.level <= max_fight_level:
+            return True
+        if self.is_craft_type() and self.details.level <= character_infos[f'{self.details.craft.skill}_level']:
+            return True
+        if self.is_gather_type() and self.details.level <= character_infos[f'{self.details.skill}_level']:
+            return True
+        return False
 
 
 class Status(BaseModel):
@@ -736,40 +829,16 @@ class Status(BaseModel):
     server_time: str
 
 
-class Craft(BaseModel):
-    skill: str
-    level: int
-    items: list
-
-
-class Item(BaseModel):
-    code: str
-    level: int
-    type: str
-    subtype: str
-    craft: Optional[Craft]
-
-    def is_gatherable(self) -> bool:
-        return self.craft is None and self.type == "resource" and self.subtype in ["mining", "woodcutting", "fishing"]
-
-    def is_from_task(self) -> bool:
-        return self.type == "resource" and self.subtype == "task"
-
-    def is_rare_drop(self) -> bool:
-        # TODO get it dynamic through the drop rate ?
-        return self.code in ['topaz', 'emerald', 'ruby', 'sapphire', 'sap', 'magic_sap', 'diamond']
-
-
 class Environment(BaseModel):
-    items: dict[str, dict]
-    monsters: dict[str, dict]
-    resource_locations: dict[str, dict]
+    items: dict[str, Item]
+    monsters: dict[str, Monster]
+    resource_locations: dict[str, Resource]
     maps: list[dict]
     status: Status
-    crafted_items: list[dict] = None
-    equipments: dict[str, dict] = None
-    consumables: dict[str, dict] = None
-    dropped_items: list[dict] = None
+    crafted_items: list[Item] = None
+    equipments: dict[str, Item] = None
+    consumables: dict[str, Item] = None
+    dropped_items: list[Item] = None
 
     # Allow arbitrary types if necessary (e.g., for custom types like Status)
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -781,82 +850,31 @@ class Environment(BaseModel):
         self.consumables = self.get_consumables()
         self.dropped_items = self.get_dropped_items()
 
-    @staticmethod
-    def is_item_from_task(item: dict) -> bool:
-        return item["type"] == "resource" and item["subtype"] == "task"
-
-    @staticmethod
-    def is_item_rare(item: dict) -> bool:
-        return item["code"] in ['topaz', 'emerald', 'ruby', 'sapphire', 'sap', 'magic_sap', 'diamond']
-
-    @staticmethod
-    def is_item_protected(item: dict) -> bool:
-        return Environment.is_item_from_task(item) or Environment.is_item_rare(item)
-
-    def is_consumable_protected(self, consumable: dict) -> bool:
-        protected_consumable = [
-            consumable
-            for consumable in self.consumables.values()
-            # if any(["boost" in effect["name"] for effect in cooked_consumable['effects']])
-        ]
-        return consumable["code"] in [c["code"] for c in protected_consumable]
-
-    @staticmethod       # TODO have an Item class
-    def is_item_dropped(item: dict) -> bool:
-        return item["type"] == "resource" and item["subtype"] in ["mob", "food"]
-
-    @staticmethod
-    def is_item_an_equipment(item: dict) -> bool:
-        return item["type"] in EQUIPMENTS_TYPES
-
-    @staticmethod
-    def is_item_a_consumable(item: dict) -> bool:
-        craft = item["craft"]
-        if craft is None:
-            return False
-        return craft["skill"] in ['cooking']
-
-    @staticmethod
-    def is_item_gatherable(item: dict) -> bool:
-        return item["craft"] is None and item["type"] == "resource" and item["subtype"] in ["mining", "woodcutting", "fishing"]
-
-    @staticmethod
-    def is_item_crafted(item: dict) -> bool:
-        return item["craft"] is not None
-
-    @staticmethod
-    def is_item_dropped_equipment(item: dict) -> bool:
-        return Environment.is_item_an_equipment(item) and not Environment.is_item_crafted(item)
-
-    @staticmethod
-    def is_item_given(item: dict) -> bool:
-        return Environment.is_item_dropped_equipment(item) or item["subtype"] in ["task"] or item["type"] in ["currency"]
-
-    def get_item_dropping_monsters(self, item_code: str) -> list[tuple[dict, int]]:
+    def get_item_dropping_monsters(self, item_code: str) -> list[tuple[Monster, int]]:
         item_dropping_monsters = []
         for monster in self.monsters.values():
-            for item_details in monster["drops"]:
-                if item_details["code"] == item_code:
-                    item_dropping_monsters.append((monster, item_details["rate"]))
+            for item_details in monster.drops:
+                if item_details.code == item_code:
+                    item_dropping_monsters.append((monster, item_details.rate))
         item_dropping_monsters = sorted(item_dropping_monsters, key=lambda x: x[1], reverse=False)
         return item_dropping_monsters
 
-    def get_item_dropping_monster(self, item_code: str) -> dict:
+    def get_item_dropping_monster(self, item_code: str) -> Monster:
         item_dropping_monsters = self.get_item_dropping_monsters(item_code)
         if len(item_dropping_monsters) > 0:
             return item_dropping_monsters[0][0]
         return {}
 
-    def get_item_dropping_locations(self, item_code: str) -> list[tuple[dict, int]]:
+    def get_item_dropping_locations(self, item_code: str) -> list[tuple[Resource, int]]:
         item_dropping_locations = []
         for resource_location in self.resource_locations.values():
-            for item_details in resource_location["drops"]:
-                if item_details["code"] == item_code:
-                    item_dropping_locations.append((resource_location, item_details["rate"]))
+            for drop in resource_location.drops:
+                if drop.code == item_code:
+                    item_dropping_locations.append((resource_location, drop.rate))
         item_dropping_locations = sorted(item_dropping_locations, key=lambda x: x[1], reverse=False)
         return item_dropping_locations
 
-    def get_item_dropping_location(self, item_code: str) -> dict:
+    def get_item_dropping_location(self, item_code: str) -> Resource:
         item_dropping_locations = self.get_item_dropping_locations(item_code)
         if len(item_dropping_locations) > 0:
             return item_dropping_locations[0][0]
@@ -868,32 +886,32 @@ class Environment(BaseModel):
             return item_dropping_locations[0][1]
         return 9999
 
-    def get_dropped_items(self) -> list[dict]:
+    def get_dropped_items(self) -> list[Item]:
         return [
             item
             for item in self.items.values()
-            if self.is_item_dropped(item)
+            if item.is_dropped()
         ]
 
-    def get_crafted_items(self) -> list[dict]:
+    def get_crafted_items(self) -> list[Item]:
         return [
             item
             for _, item in self.items.items()
-            if self.is_item_crafted(item)
+            if item.is_crafted()
         ]
 
-    def get_equipments(self) -> dict[str, dict]:
+    def get_equipments(self) -> dict[str, Item]:
         return {
             item_code: item
             for item_code, item in self.items.items()
-            if item["type"] in EQUIPMENTS_TYPES
+            if item.is_equipment()
         }
 
-    def get_consumables(self) -> dict[str, dict]:
+    def get_consumables(self) -> dict[str, Item]:
         return {
-            item["code"]: item
+            item.code: item
             for item in self.crafted_items
-            if self.is_item_a_consumable(item)
+            if item.is_consumable()
         }
 
 
@@ -906,12 +924,13 @@ class Character(BaseModel):
     max_fight_level: int = 0
     stock_qty_objective: int = 500
     task: Task = Field(default_factory=Task)
-    gatherable_resources: list[dict] = Field(default_factory=list)
-    craftable_items: list[dict] = Field(default_factory=list)
-    fightable_monsters: list[dict] = Field(default_factory=list)
-    fightable_materials: list[dict] = Field(default_factory=list)
-    objectives: list[dict] = Field(default_factory=list)
-    fight_objectives: list[dict] = Field(default_factory=list)
+    gatherable_resources: list[Item] = Field(default_factory=list)
+    craftable_items: list[Item] = Field(default_factory=list)
+    fightable_monsters: list[Monster] = Field(default_factory=list)
+    fightable_materials: list[Item] = Field(default_factory=list)
+    objectives: list[Item] = Field(default_factory=list)
+    fight_objectives: list[Monster] = Field(default_factory=list)
+    # infos: dict = Field(default_factory=dict)
 
     _logger: logging.Logger = PrivateAttr()
 
@@ -935,13 +954,6 @@ class Character(BaseModel):
         )
         await self.set_objectives()
 
-    async def is_feasible_task(self, task: Task) -> bool:
-        if task.type == TaskType.MONSTERS and task.details['level'] <= self.max_fight_level:
-            return True
-        if task.type in {TaskType.ITEMS, TaskType.RESOURCES} and task.details['level'] <= self.get_skill_level(task.details['skill']):
-            return True
-        return False
-
     async def set_gatherable_resources(self, infos: dict):
         """
         Fetch and set gatherable resources based on the character's collect skill and level
@@ -949,18 +961,18 @@ class Character(BaseModel):
         gatherable_resources = []
 
         for item_code, item in self.environment.items.items():
-            if self.environment.is_item_gatherable(item) and item["level"] <= infos[f'{item["subtype"]}_level']:
+            if item.is_gatherable() and item.level <= infos[f'{item.subtype}_level']:
                 if self.environment.get_item_dropping_max_rate(item_code) <= 100:
                     gatherable_resources.append(item)
 
         self.gatherable_resources = gatherable_resources
-        self._logger.info(f"Gatherable resources for {self.name}: {[r['code'] for r in self.gatherable_resources]}")
+        self._logger.info(f"Gatherable resources for {self.name}: {[r.code for r in self.gatherable_resources]}")
 
     async def set_craftable_items(self, infos: dict):
         """
         Fetch and set craftable items based on the character's craft skill and level
         """
-        skill_craftable_items = [item for item in self.environment.crafted_items if item['level'] < infos[f'{item["craft"]["skill"]}_level']]
+        skill_craftable_items = [item for item in self.environment.crafted_items if item.level < infos[f'{item.craft.skill}_level']]
         craftable_items = skill_craftable_items[::-1]
         # TODO exclude protected items (such as the one using jasper_crystal)
 
@@ -975,10 +987,10 @@ class Character(BaseModel):
         filtered_craftable_items = [
             item
             for item in craftable_items
-            if item['code'] not in excluded_item_codes
+            if item.code not in excluded_item_codes
         ]
         self.craftable_items = filtered_craftable_items
-        self._logger.warning(f"Craftable items for {self.name}: {[i['code'] for i in self.craftable_items]}")
+        self._logger.warning(f"Craftable items for {self.name}: {[i.code for i in self.craftable_items]}")
 
     async def set_fightable_monsters(self):
         """
@@ -987,33 +999,33 @@ class Character(BaseModel):
         fightable_monsters = [
             monster
             for monster in self.environment.monsters.values()
-            if monster["level"] <= self.max_fight_level
+            if monster.level <= self.max_fight_level    # TODO create method is_fightable
         ]
         # TODO make it dynamic based on real fight capacity
-        self.fightable_monsters = [m for m in fightable_monsters if m['code'] not in EXCLUDED_MONSTERS]
+        self.fightable_monsters = [m for m in fightable_monsters if m.code not in EXCLUDED_MONSTERS]
         self.fightable_materials = [
-            {item["code"]: item for item in get_items_list_by_type(self.environment.items, "resource")}[drop['code']]
-            for monster_details in self.fightable_monsters
-            for drop in monster_details['drops']
-            if drop['rate'] <= 50
+            {item.code: item for item in self.environment.items.values() if item.type == "resource"}[drop.code]
+            for monster in self.fightable_monsters
+            for drop in monster.drops
+            if drop.rate <= 50
         ]
-        self._logger.debug(f"Fightable monsters for {self.name}: {[m['code'] for m in self.fightable_monsters]}")
-        self._logger.debug(f"Fightable materials for {self.name}: {[m['code'] for m in self.fightable_materials]}")
+        self._logger.debug(f"Fightable monsters for {self.name}: {[m.code for m in self.fightable_monsters]}")
+        self._logger.debug(f"Fightable materials for {self.name}: {[m.code for m in self.fightable_materials]}")
 
-    async def can_be_home_made(self, item: dict) -> bool:
-        if self.environment.is_item_gatherable(item):
-            return item["code"] in [i['code'] for i in self.gatherable_resources]
-        elif self.environment.is_item_dropped(item):
-            return item["code"] in [i['code'] for i in self.fightable_materials]
-        elif self.environment.is_item_crafted(item):
+    async def can_be_home_made(self, item: Item) -> bool:
+        if item.is_gatherable():
+            return item.code in [i.code for i in self.gatherable_resources]
+        elif item.is_dropped():
+            return item.code in [i.code for i in self.fightable_materials]
+        elif item.is_crafted():
             return all([
                 await self.can_be_home_made(self.environment.items[material_code])
                 for material_code in list(get_craft_recipee(item).keys())
             ])
-        elif self.environment.is_item_given(item):
+        elif item.is_given():
             return False
         else:
-            self._logger.warning(f' {item["code"]} to categorize')
+            self._logger.warning(f' {item.code} to categorize')
 
     async def set_objectives(self):
         # Out of craftable items, which one can be handled autonomously
@@ -1028,23 +1040,23 @@ class Character(BaseModel):
             for item in self.craftable_items
             if not await self.can_be_home_made(item) and await self.does_item_provide_xp(item)
         ]
-        self._logger.info(f' NEED LEVELING UP OR SPECIAL MATERIALS TO CRAFT: {[o["code"] for o in need_level_up_craftable_items]}')
+        self._logger.info(f' NEED LEVELING UP OR SPECIAL MATERIALS TO CRAFT: {[o.code for o in need_level_up_craftable_items]}')
 
         # Sort items by their rarity in the bank (to prioritize items that are rarer)
         items2bank_qty = {
-            craftable_item['code']: await get_bank_item_qty(self.session, craftable_item['code'])
+            craftable_item.code: await get_bank_item_qty(self.session, craftable_item.code)
             for craftable_item in objectives
         }
 
-        item_objectives = sorted(objectives, key=lambda x: items2bank_qty.get(x['code'], 0), reverse=False)
+        item_objectives = sorted(objectives, key=lambda x: items2bank_qty.get(x.code, 0), reverse=False)
 
         resource_objectives = [
             resource
             for resource in self.gatherable_resources
-            if await self.can_be_home_made(resource) and await self.does_item_provide_xp(resource) and resource["code"] not in ["magic_tree", "demon"]
+            if await self.can_be_home_made(resource) and await self.does_item_provide_xp(resource) and resource.code not in ["magic_tree", "demon"]
         ]
 
-        self._logger.info(f' RESOURCES OBJECTIVES: {[o["code"] for o in resource_objectives]}')
+        self._logger.info(f' RESOURCES OBJECTIVES: {[o.code for o in resource_objectives]}')
 
         item_objectives.extend(resource_objectives[::-1])
 
@@ -1052,7 +1064,7 @@ class Character(BaseModel):
         item_objectives = [
             item
             for item in item_objectives
-            if (item.get('craft') and item['craft']['skill'] in self.skills) or (item['type'] == 'resource' and item['subtype'] in self.skills)
+            if item.is_skill_compliant(self.skills)
         ]
 
         fight_objectives = [
@@ -1063,10 +1075,10 @@ class Character(BaseModel):
 
         self.objectives = item_objectives
         self.fight_objectives = fight_objectives[::-1]
-        self._logger.info(f' CAN GET XP WITH: {[o["code"] for o in self.objectives]}')
+        self._logger.info(f' CAN GET XP WITH: {[o.code for o in self.objectives]}')
 
-    async def can_be_vanquished(self, monster: dict) -> bool:
-        return monster["code"] in [m["code"] for m in self.fightable_monsters]
+    async def can_be_vanquished(self, monster: Monster) -> bool:
+        return monster.code in [m.code for m in self.fightable_monsters]
 
     async def get_infos(self) -> dict:
         url = f"{SERVER}/characters/{self.name}"
@@ -1134,8 +1146,8 @@ class Character(BaseModel):
 
     async def gather_material(self, material_code: str, quantity: int):
 
-        location_details = self.environment.get_item_dropping_location(material_code)
-        location_coords = await self.get_nearest_coords('resource', location_details['code'])
+        resource_location = self.environment.get_item_dropping_location(material_code)
+        location_coords = await self.get_nearest_coords('resource', resource_location.code)
 
         cooldown_ = await self.move(*location_coords)
         await asyncio.sleep(cooldown_)
@@ -1172,7 +1184,7 @@ class Character(BaseModel):
             return
 
         monster = self.environment.get_item_dropping_monster(material_code)
-        await self.move_to_monster(monster["code"])
+        await self.move_to_monster(monster.code)
 
         while await self.is_inventory_not_full() and await self.get_inventory_quantity(material_code) < quantity_to_get:
             cooldown_ = await self.perform_fighting()
@@ -1321,10 +1333,10 @@ class Character(BaseModel):
                 return item_infos['quantity']
         return 0
 
-    async def get_nb_craftable_items(self, _item: dict, from_inventory: bool = False) -> int:
+    async def get_nb_craftable_items(self, _item: Item, from_inventory: bool = False) -> int:
 
         craft_recipee = get_craft_recipee(_item)
-        self._logger.debug(f' recipee for {_item["code"]} is {craft_recipee}')
+        self._logger.debug(f' recipee for {_item.code} is {craft_recipee}')
         total_nb_materials = sum([qty for _, qty in craft_recipee.items()])
         nb_craftable_items = await self.get_inventory_max_size() // total_nb_materials
 
@@ -1333,7 +1345,7 @@ class Character(BaseModel):
                 material_inventory_qty = await self.get_inventory_quantity(material_code)
                 nb_craftable_items = min(material_inventory_qty//qty, nb_craftable_items)
 
-        self._logger.debug(f' nb of craftable items {"from inventory" if from_inventory else ""} for {_item["code"]} is {nb_craftable_items}')
+        self._logger.debug(f' nb of craftable items {"from inventory" if from_inventory else ""} for {_item.code} is {nb_craftable_items}')
 
         return nb_craftable_items
 
@@ -1409,35 +1421,35 @@ class Character(BaseModel):
             self._logger.error(f'failed to gather resources.')
             return 0
 
-    async def perform_recycling(self, item: dict, qte: int) -> int:
+    async def perform_recycling(self, _item: Item, qte: int) -> int:
         url = f"{SERVER}/my/{self.name}/action/recycling"
         payload = {
-            "code": item["code"],
+            "code": _item.code,
             "quantity": qte
         }
 
         # SECURITY CHECK ON RARE ITEMS
-        if 'jasper_crystal' in get_craft_recipee(item).keys() or 'magical_cure' in get_craft_recipee(item).keys():
-            self._logger.warning(f' Item {item["code"]} is rare so better not to recycle it.')
+        if 'jasper_crystal' in get_craft_recipee(_item).keys() or 'magical_cure' in get_craft_recipee(_item).keys():
+            self._logger.warning(f' Item {_item.code} is rare so better not to recycle it.')
             return 0
 
         data = await make_request(session=self.session, method='POST', url=url, payload=payload)
         if data:
             _cooldown = data["data"]["cooldown"]["total_seconds"]
-            self._logger.info(f'{qte} {item["code"]} recycled. Cooldown: {_cooldown} seconds')
+            self._logger.info(f'{qte} {_item.code} recycled. Cooldown: {_cooldown} seconds')
             return _cooldown
         else:
-            self._logger.error(f'failed to recycle {qte} {item["code"]}.')
+            self._logger.error(f'failed to recycle {qte} {_item.code}.')
             return 0
 
     async def is_gatherable(self, resource_code) -> bool:
-        return resource_code in [item["code"] for item in self.gatherable_resources]
+        return resource_code in [item.code for item in self.gatherable_resources]
 
     async def is_fightable(self, material_code) -> bool:
-        return material_code in [item["code"] for item in self.fightable_materials]
+        return material_code in [item.code for item in self.fightable_materials]
 
     async def is_craftable(self, item_code) -> bool:
-        return item_code in [item["code"] for item in self.craftable_items]
+        return item_code in [item.code for item in self.craftable_items]
 
     async def is_collectable_at_bank(self, item_code, quantity) -> bool:
         qty_at_bank = await get_bank_item_qty(self.session, item_code)
@@ -1445,7 +1457,7 @@ class Character(BaseModel):
 
     async def move_to_workshop(self):
         # get the skill out of item
-        skill_name = self.task.details['craft']['skill']
+        skill_name = self.task.details.craft.skill
         coords = await self.get_nearest_coords(content_type='workshop', content_code=skill_name)
         self._logger.debug(f'{self.name} > moving to workshop at {coords}')
         cooldown_ = await self.move(*coords)
@@ -1471,10 +1483,11 @@ class Character(BaseModel):
         infos = await self.get_infos()
         return infos[f'{_equipment_slot}_slot']
 
-    async def get_current_equipments(self) -> dict[str, dict]:
+    async def get_current_equipments(self) -> dict[str, Item]:
         infos = await self.get_infos()
         return {
-            equipment_slot: self.environment.items[infos[f'{equipment_slot}_slot']] if infos[f'{equipment_slot}_slot'] != "" else {}
+            equipment_slot: self.environment.items[infos[f'{equipment_slot}_slot']]
+            if infos[f'{equipment_slot}_slot'] != "" else None
             for equipment_slot in EQUIPMENTS_SLOTS
         }
 
@@ -1513,7 +1526,7 @@ class Character(BaseModel):
         # Ensure equipments are valid for the character's level
         valid_equipments = [
             equipment for equipment in valid_equipments
-            if await self.is_valid_equipment(equipment)
+            if equipment.is_valid_equipment(await self.get_level())
         ]
 
         if not valid_equipments:
@@ -1535,10 +1548,10 @@ class Character(BaseModel):
 
         # Select the best equipment
         best_equipment = valid_equipments[0]
-        self._logger.debug(f"Selected best equipment {best_equipment['code']} for gathering skill {gathering_skill}")
+        self._logger.debug(f"Selected best equipment {best_equipment.code} for gathering skill {gathering_skill}")
 
         # Equip the best equipment
-        await self.go_and_equip("weapon", best_equipment['code'])
+        await self.go_and_equip("weapon", best_equipment.code)
 
     async def gather_and_collect(self, _craft_details: dict[str, dict[str, int]]):
         fight_details = _craft_details['fight']
@@ -1575,17 +1588,17 @@ class Character(BaseModel):
 
         return material2deposit_qty
 
-    async def does_item_provide_xp(self, item_details: dict) -> bool:
+    async def does_item_provide_xp(self, _item: Item) -> bool:
         """
         Determine if a given item will provide XP when crafted, gathered, or fished.
         This depends on the item's level compared to the character's skill level.
         """
         # Check if the item is craftable
-        if item_details.get('craft', None):
-            skill_name = item_details['craft']['skill']
+        if _item.craft:
+            skill_name = _item.craft.skill
         else:
             # Non-craftable items are checked by subtype (gathering, fishing, etc.)
-            skill_name = item_details.get('subtype', None)
+            skill_name = _item.subtype
 
         # If there's no valid skill (item can't be crafted or gathered), it provides no XP
         if not skill_name:
@@ -1595,15 +1608,14 @@ class Character(BaseModel):
         skill_level = await self.get_skill_level(skill_name)
 
         # Item level must be within range of skill level to provide XP (e.g., within 10 levels)
-        item_level = item_details['level']
+        item_level = _item.level
 
         # Example threshold: if item is within 10 levels of the character's skill level, it gives XP
         return item_level >= (skill_level - 10) and skill_level < self.environment.status.max_level
 
-    async def does_fight_provide_xp(self, monster: dict) -> bool:
+    async def does_fight_provide_xp(self, monster: Monster) -> bool:
         character_level = await self.get_level()
-        monster_level = monster['level']
-        return monster_level >= (character_level - 10) and character_level < self.environment.status.max_level
+        return monster.level >= (character_level - 10) and character_level < self.environment.status.max_level
 
     async def select_eligible_targets(self) -> list[str]:
         """
@@ -1616,7 +1628,7 @@ class Character(BaseModel):
         valid_craftable_items = self.gatherable_resources
 
         # Log eligible items
-        self._logger.debug(f'Eligible items for XP: {[item["code"] for item in valid_craftable_items]}')
+        self._logger.debug(f'Eligible items for XP: {[item.code for item in valid_craftable_items]}')
 
         if not valid_craftable_items:
             self._logger.warning(f'No valid craftable/gatherable items found for {self.name} that provide XP.')
@@ -1624,53 +1636,48 @@ class Character(BaseModel):
 
         # Sort items by their rarity in the bank (to prioritize items that are rarer)
         items2bank_qty = {
-            craftable_item['code']: await get_bank_item_qty(self.session, craftable_item['code'])
+            craftable_item.code: await get_bank_item_qty(self.session, craftable_item.code)
             for craftable_item in valid_craftable_items
         }
 
-        self.craftable_items = sorted(valid_craftable_items, key=lambda x: items2bank_qty.get(x['code'], 0), reverse=False)
+        self.craftable_items = sorted(valid_craftable_items, key=lambda x: items2bank_qty.get(x.code, 0), reverse=False)
 
-        return [item['code'] for item in self.craftable_items]
+        return [item.code for item in self.craftable_items]
 
-    async def is_valid_equipment(self, equipment_infos: dict) -> bool:
+    async def is_valid_equipment(self, _equipment: Item) -> bool:
         character_level = await self.get_level()
-        return character_level >= equipment_infos['level']
+        return character_level >= _equipment.level
 
-    async def equip_for_fight(self, _monster: dict = None):
+    async def equip_for_fight(self, _monster: Monster = None):
 
         if _monster is None:
-            _monster_code = self.task.code
-            monster_infos = self.task.details
-        else:
-            _monster_code = _monster["code"]
-            monster_infos = _monster
+            _monster = self.task.details
 
         # Identify vulnerability
-        vulnerabilities = await get_monster_vulnerabilities(monster_infos=monster_infos)
-        self._logger.debug(f' monster {_monster_code} vulnerabilities are {vulnerabilities}')
-
-        # FIXME
-        if _monster_code == 'bandit_lizard':
-            vulnerabilities = {"water": 5}
+        vulnerabilities = _monster.get_vulnerabilities()
+        self._logger.debug(f' monster {_monster.code} vulnerabilities are {vulnerabilities}')
 
         current_equipments = await self.get_current_equipments()
         sorted_valid_bank_equipments = await self.get_sorted_valid_bank_equipments()
 
         selected_equipments = await select_best_equipment_set(current_equipments, sorted_valid_bank_equipments, vulnerabilities)
-        for equipment_slot, equipment_details in selected_equipments.items():
-            await self.go_and_equip(equipment_slot, equipment_details.get('code', ""))
+        for equipment_slot, equipment in selected_equipments.items():
+            if equipment is not None:
+                await self.go_and_equip(equipment_slot, equipment.code)
+            else:
+                self._logger.debug(f"No equipment selected for slot {equipment_slot}")
 
         # Manage consumables
         await self.equip_best_consumables()
 
-    async def get_eligible_bank_consumables(self) -> list[dict]:
+    async def get_eligible_bank_consumables(self) -> list[Item]:
         return [
-            consumable_infos
-            for consumable_infos in self.environment.consumables.values()
-            if await get_bank_item_qty(self.session, consumable_infos["code"]) > 0 and consumable_infos['level'] <= await self.get_level()
+            consumable
+            for consumable in self.environment.consumables.values()
+            if await get_bank_item_qty(self.session, consumable.code) > 0 and consumable.level <= await self.get_level()
         ]
 
-    async def get_2_best_consumables_including_equipped(self) -> list[dict]:
+    async def get_2_best_consumables_including_equipped(self) -> list[Item]:
         """
         Fetches the two best consumables, including currently equipped ones, and ranks them.
         """
@@ -1678,15 +1685,15 @@ class Character(BaseModel):
         valid_consumables = await self.get_eligible_bank_consumables()
 
         # Add the currently equipped consumables to the list of valid ones (if they are equipped)
-        valid_consumables_codes = [c["code"] for c in valid_consumables]
+        valid_consumables_codes = [c.code for c in valid_consumables]
         ordered_current_consumables = await self.get_ordered_current_consumables()
         for current_consumable in ordered_current_consumables:
-            if current_consumable and current_consumable["code"] not in valid_consumables_codes:
+            if current_consumable and current_consumable.code not in valid_consumables_codes:
                 valid_consumables.append(current_consumable)
 
         valid_consumables = [
             consumable for consumable in valid_consumables
-            if not self.environment.is_consumable_protected(consumable)
+            if not consumable.is_protected_consumable()
         ]
 
         self._logger.debug(f' eligible consumables are {valid_consumables}')
@@ -1701,10 +1708,10 @@ class Character(BaseModel):
 
         # Single loop to determine the best consumables for each slot
         for consumable in sorted_two_best_consumables:
-            if ordered_current_consumables[0] and consumable["code"] == ordered_current_consumables[0]["code"]:
+            if ordered_current_consumables[0] and consumable.code == ordered_current_consumables[0].code:
                 # Keep in the same slot if it's already consumable1
                 two_best_consumables[0] = consumable
-            elif ordered_current_consumables[1] and consumable["code"] == ordered_current_consumables[1]["code"]:
+            elif ordered_current_consumables[1] and consumable.code == ordered_current_consumables[1].code:
                 # Keep in the same slot if it's already consumable2
                 two_best_consumables[1] = consumable
             else:
@@ -1736,7 +1743,7 @@ class Character(BaseModel):
             character_infos = await self.get_infos()
             current_code = character_infos.get(f"{slot}_slot", "")
             current_qty = character_infos.get(f"{slot}_slot_quantity", 0)
-            new_code = new_consumable["code"]
+            new_code = new_consumable.code
 
             # Check if the new consumable is the same as the current one
             if current_code == new_code:
@@ -1763,7 +1770,7 @@ class Character(BaseModel):
                     await self.withdraw_items_from_bank({new_code: new_qty})
                     await self.equip(new_code, slot, new_qty)
 
-    async def get_ordered_current_consumables(self) -> list[dict]:
+    async def get_ordered_current_consumables(self) -> list[Item]:
         character_infos = await self.get_infos()
         currently_equipped_consumables = [character_infos['consumable1_slot'], character_infos['consumable2_slot']]
         self._logger.debug(f' Currently equipped consumables: {currently_equipped_consumables}')
@@ -1771,14 +1778,14 @@ class Character(BaseModel):
 
     async def equip_best_equipment(self, _equipment_slot: str, vulnerabilities: dict[str, int]):
         available_equipments = await self.get_bank_equipments_for_slot(_equipment_slot)
-        self._logger.debug(f'available equipment at bank {[e["code"] for e in available_equipments]}')
+        self._logger.debug(f'available equipment at bank {[e.code for e in available_equipments]}')
         sorted_valid_equipments = sorted([
             equipment
             for equipment in available_equipments
-            if await self.is_valid_equipment(equipment)
-        ], key=lambda x: x['level'], reverse=True)
+            if equipment.is_valid_equipment(await self.get_level())
+        ], key=lambda x: x.level, reverse=True)
 
-        self._logger.debug(f'may be equipped with {[e["code"] for e in sorted_valid_equipments]}')
+        self._logger.debug(f'may be equipped with {[e.code for e in sorted_valid_equipments]}')
 
         current_equipment_code = await self.get_equipment_code(_equipment_slot)
         if len(sorted_valid_equipments) == 0:
@@ -1827,30 +1834,30 @@ class Character(BaseModel):
         cooldown_ = await self.perform_equip(item_code, slot_code, qte)
         await asyncio.sleep(cooldown_)
 
-    async def get_bank_equipments_for_slot(self, equipment_slot: str) -> list[dict]:
+    async def get_bank_equipments_for_slot(self, equipment_slot: str) -> list[Item]:
         bank_items = await get_bank_items(self.session)
         return [
             self.environment.equipments[item_code]
             for item_code in bank_items.keys()
             # 'ring' in 'ring1'
-            if self.environment.equipments.get(item_code, None) is not None and self.environment.equipments[item_code]['type'] in equipment_slot
+            if self.environment.equipments.get(item_code, None) is not None and self.environment.equipments[item_code].type in equipment_slot
         ]
 
-    async def get_sorted_valid_bank_equipments(self) -> dict[str, list[dict]]:
-        bank_items = await get_bank_items(self.session)
+    async def get_sorted_valid_bank_equipments(self) -> dict[str, list[Item]]:
+        bank_items = await get_bank_items(self.session)     # TODO use Item ?
         bank_equipments ={}
         for equipment_slot in EQUIPMENTS_SLOTS:
             slot_equipments = [
                 self.environment.equipments[item_code]
                 for item_code in bank_items.keys()
                 # 'ring' in 'ring1'
-                if self.environment.equipments.get(item_code, None) is not None and self.environment.equipments[item_code]['type'] in equipment_slot
+                if self.environment.equipments.get(item_code, None) is not None and self.environment.equipments[item_code].type in equipment_slot
             ]
             sorted_slot_equipments = sorted([
                 equipment
                 for equipment in slot_equipments
-                if await self.is_valid_equipment(equipment)
-            ], key=lambda x: x['level'], reverse=True)
+                if equipment.is_valid_equipment(await self.get_level())
+            ], key=lambda x: x.level, reverse=True)
             bank_equipments[equipment_slot] = sorted_slot_equipments
         return bank_equipments
 
@@ -1902,17 +1909,17 @@ class Character(BaseModel):
         for item_code, item_qty in (await get_bank_items(self.session)).items():
             # No recycling for planks and ores and cooking
             item = self.environment.items[item_code]
-            if item["craft"] and item["craft"]["skill"] in ['woodcutting', 'mining', 'cooking']:
+            if item.is_not_recyclable():
                 continue
-            min_qty = get_min_stock_qty(item)
-            if self.environment.is_item_crafted(item) and item_qty > min_qty:
+            min_qty = item.get_min_stock_qty()
+            if item.is_crafted() and item_qty > min_qty:
                 recycle_details[item_code] = item_qty - min_qty
         return recycle_details
 
-    async def is_worth_selling(self, _item: dict) -> bool:
-        item_gold_value = _item["ge"]["sell_price"]     # FIXME this could be moving // need to be up to date
+    async def is_worth_selling(self, _item: Item) -> bool:
+        item_gold_value = _item.get_sell_price()   # FIXME this could be moving // need to be up to date
         materials = [self.environment.items[material] for material in get_craft_recipee(_item).keys()]
-        if any([self.environment.is_item_protected(material) for material in materials]):
+        if any([material.is_protected() for material in materials]):
             return False
         gold_value_sorted_materials = sorted(materials, key=lambda x: x["ge"]["buy_price"], reverse=True)
         return item_gold_value > sum(gold_value_sorted_materials[:2])
@@ -1947,17 +1954,17 @@ class Character(BaseModel):
             return self.objectives[0]
         return self.environment.items["iron"]
 
-    async def set_task(self, item: dict, task_type: TaskType, quantity: int):
+    async def set_task(self, item: Item, task_type: TaskType, quantity: int):
         total_nb_materials = sum([qty for _, qty in get_craft_recipee(item).items()])
         self.task = Task(
-            code=item["code"],
+            code=item.code,
             type=task_type,
             total=min(await self.get_inventory_max_size(), quantity) // total_nb_materials,
             details=item
         )
 
-    async def get_task_type(self, item: dict) -> TaskType:
-        if item["code"] in [i['code'] for i in self.gatherable_resources]:
+    async def get_task_type(self, item: Item) -> TaskType:
+        if item.code in [i.code for i in self.gatherable_resources]:
             return TaskType.RESOURCES
         return TaskType.ITEMS
 
@@ -1971,7 +1978,7 @@ class Character(BaseModel):
         total_nb_materials = sum([qty for _, qty in get_craft_recipee(objective).items()])
 
         return Task(
-            code=objective["code"],
+            code=objective.code,
             type=await self.get_task_type(objective),
             total=(await self.get_inventory_max_size()) // total_nb_materials,
             details=objective
@@ -2052,7 +2059,7 @@ class Character(BaseModel):
                     await asyncio.sleep(cooldown_)
             else:
                 location_details = self.environment.get_item_dropping_location(self.task.code)
-                location_coords = await self.get_nearest_coords('resource', location_details['code'])
+                location_coords = await self.get_nearest_coords('resource', location_details.code)
 
                 cooldown_ = await self.move(*location_coords)
                 await asyncio.sleep(cooldown_)
@@ -2149,14 +2156,14 @@ class Character(BaseModel):
         fight_objectives = [
             f
             for f in self.fight_objectives
-            if f['code'] not in ["demon", "bandit_lizard", "cultist_emperor", "rosenblood"]
+            if not f.is_event()
         ]
 
         if len(fight_objectives) > 0:
             # FIXME check if monster is reachable (example: 'demon' only available during events)
             highest_fightable_monster = fight_objectives[0]
             return Task(
-                code=highest_fightable_monster['code'],
+                code=highest_fightable_monster.code,
                 type=TaskType.MONSTERS,
                 total=99,   # FIXME when does it stop?
                 details=highest_fightable_monster
@@ -2166,21 +2173,21 @@ class Character(BaseModel):
     async def get_craft_for_equiping_task(self) -> Task:
         total_quantities = await get_all_items_quantities(self.session)
         # Keeping only the not yet available useful equipment
-        objectives_codes = [o['code'] for o in self.objectives if o['code'] not in self.obsolete_equipments]
+        objectives_codes = [o.code for o in self.objectives if o.code not in self.obsolete_equipments]
         craftable_new_equipments = [
             i
             for i in self.craftable_items      # FIXME how is cooking handled?
-            if i['code'] in objectives_codes and await needs_stock(self.session, i, total_quantities) and i['type'] in EQUIPMENTS_SLOTS + ['ring', 'artifact']
+            if i.code in objectives_codes and await needs_stock(self.session, i, total_quantities) and i.is_equipment()
         ]
 
         if len(craftable_new_equipments) > 0:
-            self._logger.warning(f' New equipments to craft: {[e["code"] for e in craftable_new_equipments]}')
+            self._logger.warning(f' New equipments to craft: {[e.code for e in craftable_new_equipments]}')
             equipment = craftable_new_equipments[0]
             equipment_qty = await get_all_map_item_qty(self.session, equipment)
             equipment_min_stock = get_min_stock_qty(equipment)
-            self._logger.warning(f' Got {equipment_qty} {equipment["code"]} on map, need at least {equipment_min_stock}')
+            self._logger.warning(f' Got {equipment_qty} {equipment.code} on map, need at least {equipment_min_stock}')
             return Task(
-                code=equipment["code"],
+                code=equipment.code,
                 type=TaskType.ITEMS,
                 total=equipment_min_stock - equipment_qty,
                 details=equipment
@@ -2195,7 +2202,6 @@ class Character(BaseModel):
             if event["name"] in ["Bandit Camp", "Portal"]:
                 monster_code = event["map"]["content"]["code"]
                 monster_details = self.environment.monsters[monster_code]
-                monster_details['location'] = (event["map"]["x"], event["map"]["y"])
                 monster_task = Task(
                     code=monster_code,
                     type=TaskType.MONSTERS,
@@ -2208,14 +2214,13 @@ class Character(BaseModel):
                 eligible_tasks.append(monster_task)
             if event["name"] in ["Magic Apparition", "Strange Apparition"]:
                 resource_code = event["map"]["content"]["code"]
-                resource_details = self.environment.resource_locations[resource_code]
-                if await self.get_skill_level(resource_details["skill"]) >= resource_details["level"]:
-                    resource_details['location'] = (event["map"]["x"], event["map"]["y"])
+                resource = self.environment.resource_locations[resource_code]
+                if await self.get_skill_level(resource.skill) >= resource.level:
                     gathering_task = Task(
                         code=resource_code,
                         type=TaskType.RESOURCES,
                         total=99,   # FIXME when does it stop?
-                        details=resource_details,
+                        details=resource,
                         x=event["map"]["x"],
                         y=event["map"]["y"],
                         is_event=True
@@ -2247,7 +2252,7 @@ async def run_bot(character_object: Character):
         if event_task.type != TaskType.IDLE:
             character_object.task = event_task
         # No need to do game tasks if already a lot of task coins
-        elif (await character_object.is_feasible_task(game_task) and (await get_bank_item_qty(character_object.session, "tasks_coin") < 100)) or len(character_object.objectives) == 0:
+        elif (game_task.is_feasible(await character_object.get_infos(), character_object.max_fight_level) and (await get_bank_item_qty(character_object.session, "tasks_coin") < 200)) or len(character_object.objectives) == 0:
             character_object.task = game_task
         elif recycling_task.type != TaskType.IDLE:
             character_object.task = recycling_task
@@ -2323,7 +2328,7 @@ async def main():
         #     asyncio.create_task(get_all_status(session))
         # ]
 
-        items_data, monsters_data, resources_data, maps_data, status = await asyncio.gather(*[
+        items, monsters, resources_data, maps_data, status = await asyncio.gather(*[
             asyncio.create_task(get_all_items(session)),
             asyncio.create_task(get_all_monsters(session)),
             asyncio.create_task(get_all_resources(session)),
@@ -2332,14 +2337,14 @@ async def main():
         ])
 
         environment = Environment(
-            items=items_data,
-            monsters=monsters_data,
+            items=items,
+            monsters=monsters,
             resource_locations=resources_data,
             maps=maps_data,
             status=status
         )
 
-        obsolete_equipments = await get_obsolete_equipments(session, items_data)
+        obsolete_equipments = await get_obsolete_equipments(session, items)
 
         # LOCAL_BANK = await get_bank_items(session)
 
@@ -2350,10 +2355,10 @@ async def main():
         # Test filter
         given_items = [
             item
-            for item in items_data.values()
-            if environment.is_item_given(item)
+            for item in items.values()
+            if item.is_given()
         ]
-        logging.warning(f"Equipments that can only be given or dropped: {list(map(lambda x: x['code'], given_items))}")
+        logging.warning(f"Equipments that can only be given or dropped: {list(map(lambda x: x.code, given_items))}")
 
         characters_ = [
             Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Kersh', max_fight_level=30, skills=['weaponcrafting', 'cooking', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
