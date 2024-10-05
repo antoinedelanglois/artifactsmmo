@@ -1869,7 +1869,13 @@ class Character(BaseModel):
         elif task_type == TaskType.ITEMS:
             task_details = self.environment.items.get(task, {})
         else:
-            raise NotImplementedError()
+            # FIXME define a DefaultTask?
+            return Task(
+                code="iron",
+                type=TaskType.ITEMS,
+                total=44,
+                details=self.environment.items["iron"]
+            )
         return Task(
             code=task,
             type=task_type,
