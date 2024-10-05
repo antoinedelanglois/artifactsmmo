@@ -15,15 +15,6 @@ TOKEN = os.getenv('ARTIFACTSMMO_TOKEN')
 if not TOKEN:
     raise ValueError("Le TOKEN n'est pas défini. Veuillez le définir dans les variables d'environnement.")
 
-logging.basicConfig(
-    force=True,
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler("logs/output.log"),
-        logging.StreamHandler()
-    ]
-)
 
 # Server url
 SERVER = "https://api.artifactsmmo.com"
@@ -616,12 +607,12 @@ def select_best_support_equipment(
         vulnerabilities,
         weapon_elements
     )
-    logging.debug(f"Current equipment: {current_item.code} with score {best_score}")
+    logging.debug(f"Current equipment: {current_item.code}, Score: {best_score}")
 
     for item in equipment_list:
-        item_effects = {effect.name: effect.value for effect in current_item.effects}
+        item_effects = {effect.name: effect.value for effect in item.effects}
         item_score = calculate_support_score(item_effects, vulnerabilities, weapon_elements)
-        logging.debug(f"Evaluating equipment: {item.code} with score {item_score}")
+        logging.debug(f"Evaluating equipment: {item.code}, Effects: {item_effects}, Score: {item_score}")
         if item_score > best_score:
             best_item = item
             best_score = item_score
@@ -657,6 +648,33 @@ async def select_best_equipment_set(
     return selected_equipments
 
 
+def calculate_weapon_score(_effects: dict, _vulnerabilities: dict[str, int]) -> float:
+    score = 0.0
+    for effect_name, effect_value in _effects.items():
+        if effect_name.startswith("attack_"):
+            element = effect_name.replace("attack_", "")
+            resistance = _vulnerabilities.get(element, 0)
+            if resistance < 0:
+                # Monster is vulnerable, increase the score significantly
+                score += effect_value * 4 * (1 + abs(resistance) / 100 * 5)
+            elif resistance > 0:
+                # Monster has resistance, decrease the score significantly
+                score += effect_value * 4 * (1 - resistance / 100 * 2)
+            else:
+                # Neutral element, give lower weight
+                score += effect_value * 2
+        elif effect_name.startswith("dmg_"):
+            # Peut être pris en compte si pertinent
+            pass
+        elif effect_name == "hp":
+            score += effect_value * 0.25
+        elif effect_name == "defense":
+            score += effect_value * 0.5
+        else:
+            score += effect_value
+    return score
+
+
 def select_best_weapon(current_weapon: Item, weapon_list: list[Item], vulnerabilities: dict[str, int]) -> Item:
     """
     Selects the best weapon based on vulnerabilities.
@@ -666,45 +684,21 @@ def select_best_weapon(current_weapon: Item, weapon_list: list[Item], vulnerabil
     if not current_weapon:
         current_weapon = weapon_list[0]
 
-    def calculate_weapon_score(_effects: dict, _vulnerabilities: dict[str, int]) -> float:
-        score = 0.0
-        for effect_name, effect_value in _effects.items():
-            if effect_name.startswith("attack_"):
-                element = effect_name.replace("attack_", "")
-                resistance = _vulnerabilities.get(element, 0)
-                if resistance < 0:
-                    # Monster is vulnerable, increase the score significantly
-                    score += effect_value * 4 * (1 + abs(resistance) / 100 * 5)
-                elif resistance > 0:
-                    # Monster has resistance, decrease the score significantly
-                    score += effect_value * 4 * (1 - resistance / 100 * 2)
-                else:
-                    # Neutral element, give lower weight
-                    score += effect_value * 2
-            elif effect_name.startswith("dmg_"):
-                # Peut être pris en compte si pertinent
-                pass
-            elif effect_name == "hp":
-                score += effect_value * 0.25
-            elif effect_name == "defense":
-                score += effect_value * 0.5
-            else:
-                score += effect_value
-        return score
-
     best_weapon = current_weapon
     best_score = calculate_weapon_score(
         {effect.name: effect.value for effect in current_weapon.effects},
         vulnerabilities
     )
+    logging.debug(f"Current weapon: {current_weapon.code}, Score: {best_score}")
 
     for weapon in weapon_list:
         weapon_effects = {effect.name: effect.value for effect in weapon.effects}
         weapon_score = calculate_weapon_score(weapon_effects, vulnerabilities)
+        logging.debug(f"Evaluating weapon: {weapon.code}, Effects: {weapon_effects}, Score: {weapon_score}")
         if weapon_score > best_score:
             best_weapon = weapon
             best_score = weapon_score
-            logging.debug(f"Best weapon updated to {best_weapon.code} with score {best_score}'")
+            logging.info(f"Best weapon updated to {best_weapon.code} with score {best_score}")
 
     return best_weapon
 
@@ -863,7 +857,7 @@ class Environment(BaseModel):
         item_dropping_monsters = self.get_item_dropping_monsters(item_code)
         if len(item_dropping_monsters) > 0:
             return item_dropping_monsters[0][0]
-        return {}
+        return None
 
     def get_item_dropping_locations(self, item_code: str) -> list[tuple[Resource, int]]:
         item_dropping_locations = []
@@ -878,7 +872,7 @@ class Environment(BaseModel):
         item_dropping_locations = self.get_item_dropping_locations(item_code)
         if len(item_dropping_locations) > 0:
             return item_dropping_locations[0][0]
-        return {}
+        return None
 
     def get_item_dropping_max_rate(self, item_code: str) -> int:
         item_dropping_locations = self.get_item_dropping_locations(item_code)
@@ -2375,6 +2369,17 @@ async def main():
         await asyncio.gather(*[run_bot(character) for character in characters_])
 
 if __name__ == '__main__':
+
+    logging.basicConfig(
+        force=True,
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler("logs/output.log"),
+            logging.StreamHandler()
+        ]
+    )
+
     logging.info("Bot started.")
     asyncio.run(main())
     logging.info("Bot finished.")
