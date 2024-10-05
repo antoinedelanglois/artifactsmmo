@@ -1,12 +1,13 @@
-import aiohttp
 import asyncio
 from enum import Enum
 import logging
+from aiohttp import ClientSession
 from aiohttp.client_exceptions import ClientConnectorError
 import re
 import os
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
+from typing import Optional
 
 # Charger les variables d'environnement depuis le fichier .env
 load_dotenv()
@@ -59,7 +60,7 @@ async def make_request(session, method, url, params=None, payload=None, retries=
     Helper function to make requests with retries, timeouts, and optional query parameters.
 
     Args:
-        session (aiohttp.ClientSession): The aiohttp session to use for requests.
+        session (ClientSession): The aiohttp session to use for requests.
         method (str): HTTP method to use (e.g., 'GET', 'POST').
         url (str): The endpoint URL.
         params (dict, optional): Query parameters to pass with the request.
@@ -78,7 +79,14 @@ async def make_request(session, method, url, params=None, payload=None, retries=
 
     for attempt in range(retries):
         try:
-            async with session.request(method, url, headers=headers, params=params, json=payload, timeout=timeout) as response:
+            async with session.request(
+                    method,
+                    url,
+                    headers=headers,
+                    params=params,
+                    json=payload,
+                    timeout=timeout
+            ) as response:
                 if response.status == 200:
                     return await response.json()
                 elif response.status == 404:
@@ -108,13 +116,13 @@ async def make_request(session, method, url, params=None, payload=None, retries=
     return None
 
 
-async def get_status(session: aiohttp.ClientSession) -> dict:
+async def get_status(session: ClientSession) -> dict:
     url = f"{SERVER}/"
     data = await make_request(session=session, method='GET', url=url)
     return data["data"] if data else {}
 
 
-async def get_all_status(session: aiohttp.ClientSession) -> dict:
+async def get_all_status(session: ClientSession) -> dict:
     status = await get_status(session)
     return {
         "max_level": status.get("max_level", 40),
@@ -197,7 +205,7 @@ def identify_obsolete_equipments(equipment_groups: dict[str, list[dict]]) -> lis
     return obsolete_equipments
 
 
-async def get_obsolete_equipments(session: aiohttp.ClientSession, _items: dict[str, dict]) -> dict[str, dict]:
+async def get_obsolete_equipments(session: ClientSession, _items: dict[str, dict]) -> dict[str, dict]:
     equipment_groups = get_equipments_by_type(_items)
 
     # Récupérer les quantités des items une seule fois
@@ -217,7 +225,7 @@ async def get_obsolete_equipments(session: aiohttp.ClientSession, _items: dict[s
     return {equipment['code']: equipment for equipment in obsolete_equipments}
 
 
-async def get_all_items_quantities(session: aiohttp.ClientSession) -> dict[str, int]:
+async def get_all_items_quantities(session: ClientSession) -> dict[str, int]:
     # Start fetching bank items and character infos concurrently
     bank_items_task = asyncio.create_task(get_bank_items(session))
     characters_infos_task = asyncio.create_task(get_my_characters(session))
@@ -250,13 +258,13 @@ async def get_all_items_quantities(session: aiohttp.ClientSession) -> dict[str, 
     return total_quantities
 
 
-async def needs_stock(session: aiohttp.ClientSession, _item: dict, total_quantities: dict[str, int] = None) -> bool:
+async def needs_stock(session: ClientSession, _item: dict, total_quantities: dict[str, int] = None) -> bool:
     if total_quantities is None:
         total_quantities = await get_all_items_quantities(session)
     return await get_all_map_item_qty(session, _item, total_quantities) < get_min_stock_qty(_item)
 
 
-async def get_bank_items(session: aiohttp.ClientSession, params: dict = None) -> dict:
+async def get_bank_items(session: ClientSession, params: dict = None) -> dict:
     if params is None:
         params = {"size": 100}
     else:
@@ -284,7 +292,7 @@ async def get_bank_items(session: aiohttp.ClientSession, params: dict = None) ->
     return all_items
 
 
-async def get_bank_item_qty(session: aiohttp.ClientSession, _item_code: str) -> int:
+async def get_bank_item_qty(session: ClientSession, _item_code: str) -> int:
     res = await get_bank_items(session=session, params={"item_code": _item_code})
     return res.get(_item_code, 0)
 
@@ -296,7 +304,7 @@ def get_craft_recipee(_item: dict) -> dict[str, int]:
     return {_item["code"]: 1}
 
 
-async def get_all_events(session: aiohttp.ClientSession, params: dict = None) -> list[dict]:
+async def get_all_events(session: ClientSession, params: dict = None) -> list[dict]:
     """
     Retrieves all maps from the API.
     Returns a list of maps with their details.
@@ -308,7 +316,7 @@ async def get_all_events(session: aiohttp.ClientSession, params: dict = None) ->
     return data["data"] if data else []
 
 
-async def get_all_maps(session: aiohttp.ClientSession, params: dict = None) -> list[dict]:
+async def get_all_maps(session: ClientSession, params: dict = None) -> list[dict]:
     """
     Retrieves all maps from the API.
     Returns a list of maps with their details.
@@ -320,19 +328,19 @@ async def get_all_maps(session: aiohttp.ClientSession, params: dict = None) -> l
     return data["data"] if data else []
 
 
-async def get_place_name(session: aiohttp.ClientSession, x: int, y: int) -> str:
+async def get_place_name(session: ClientSession, x: int, y: int) -> str:
     url = f"{SERVER}/maps/{x}/{y}"
     data = await make_request(session=session, method='GET', url=url)
     return data["data"]["content"]["code"]
 
 
-async def get_my_characters(session: aiohttp.ClientSession) -> list:
+async def get_my_characters(session: ClientSession) -> list:
     url = f"{SERVER}/my/characters"
     data = await make_request(session=session, method='GET', url=url)
     return data["data"] if data else []
 
 
-async def get_all_map_item_qty(session: aiohttp.ClientSession, _item: dict, total_quantities: dict[str, int] = None) -> int:
+async def get_all_map_item_qty(session: ClientSession, _item: dict, total_quantities: dict[str, int] = None) -> int:
     if total_quantities is None:
         total_quantities = await get_all_items_quantities(session)
     return total_quantities.get(_item["code"], 0)
@@ -344,7 +352,7 @@ def get_min_stock_qty(item: dict) -> int:
     return 5
 
 
-async def get_all_resources(session: aiohttp.ClientSession, params: dict = None) -> dict[str, dict]:
+async def get_all_resources(session: ClientSession, params: dict = None) -> dict[str, dict]:
     """
     Retrieves all resources from the API.
     Returns a list of resources with their details.
@@ -358,7 +366,7 @@ async def get_all_resources(session: aiohttp.ClientSession, params: dict = None)
     return {elt["code"]: elt for elt in data["data"]} if data else {}
 
 
-async def get_all_monsters(session: aiohttp.ClientSession, params: dict = None) -> dict[str, dict]:
+async def get_all_monsters(session: ClientSession, params: dict = None) -> dict[str, dict]:
     """
     Retrieves all resources from the API.
     Returns a list of resources with their details.
@@ -372,7 +380,7 @@ async def get_all_monsters(session: aiohttp.ClientSession, params: dict = None) 
     return {elt["code"]: elt for elt in data["data"]} if data else {}
 
 
-async def get_all_items(session: aiohttp.ClientSession, params: dict = None) -> dict[str, dict]:
+async def get_all_items(session: ClientSession, params: dict = None) -> dict[str, dict]:
     if params is None:
         params = {}
     items = []
@@ -393,7 +401,7 @@ async def get_all_items(session: aiohttp.ClientSession, params: dict = None) -> 
     return {item['code']: item for item in items}
 
 
-async def get_dropping_resource_locations(session: aiohttp.ClientSession, _material_code: str) -> dict:
+async def get_dropping_resource_locations(session: ClientSession, _material_code: str) -> dict:
     resources_locations = [
         loc for loc in (await get_all_resources(session)).values()
         if _material_code in [x['code'] for x in loc['drops']]
@@ -421,7 +429,8 @@ async def get_monster_vulnerabilities(monster_infos: dict) -> dict[str, int]:
     return vulnerabilities
 
 
-# def select_best_support_equipment(current_item: dict, equipment_list: list[dict], vulnerabilities: dict[str, int]) -> dict:
+# def select_best_support_equipment(current_item: dict, equipment_list: list[dict],
+# vulnerabilities: dict[str, int]) -> dict:
 #     if not equipment_list:
 #         return current_item
 #     if not current_item:
@@ -475,7 +484,12 @@ async def get_monster_vulnerabilities(monster_infos: dict) -> dict[str, int]:
 #     return best_item
 
 
-def select_best_support_equipment(current_item: dict, equipment_list: list[dict], vulnerabilities: dict[str, int], best_weapon: dict) -> dict:
+def select_best_support_equipment(
+        current_item: dict,
+        equipment_list: list[dict],
+        vulnerabilities: dict[str, int],
+        best_weapon: dict
+) -> dict:
     if not equipment_list:
         return current_item
     if not current_item:
@@ -489,13 +503,13 @@ def select_best_support_equipment(current_item: dict, equipment_list: list[dict]
             element = effect_name.replace('attack_', '')
             weapon_elements.add(element)
 
-    def calculate_support_score(_effects: dict, vulnerabilities: dict[str, int], weapon_elements: set) -> float:
+    def calculate_support_score(_effects: dict, _vulnerabilities: dict[str, int], _weapon_elements: set) -> float:
         score = 0.0
-        for effect_name, effect_value in _effects.items():
-            if effect_name.startswith("dmg_"):
-                element = effect_name.replace("dmg_", "")
-                if element in weapon_elements:
-                    resistance = vulnerabilities.get(element, 0)
+        for _effect_name, effect_value in _effects.items():
+            if _effect_name.startswith("dmg_"):
+                _element = _effect_name.replace("dmg_", "")
+                if _element in _weapon_elements:
+                    resistance = _vulnerabilities.get(_element, 0)
                     # Boost score if the support equipment's damage effect matches the weapon's attack element
                     if resistance < 0:
                         score += effect_value * 4 * (1 + abs(resistance) / 100 * 5)
@@ -506,18 +520,18 @@ def select_best_support_equipment(current_item: dict, equipment_list: list[dict]
                 else:
                     # Lesser weight if the element doesn't match the weapon's attack element
                     score += effect_value * 0.5
-            elif effect_name.startswith("res_"):
-                element = effect_name.replace("res_", "")
-                resistance = vulnerabilities.get(element, 0)
+            elif _effect_name.startswith("res_"):
+                _element = _effect_name.replace("res_", "")
+                resistance = _vulnerabilities.get(_element, 0)
                 if resistance < 0:
                     score += effect_value * 3 * (1 + abs(resistance) / 100 * 5)
                 elif resistance > 0:
                     score += effect_value * 1.5 * (1 - resistance / 100 * 2)
                 else:
                     score += effect_value * 1.0
-            elif effect_name == "hp":
+            elif _effect_name == "hp":
                 score += effect_value * 0.2
-            elif effect_name == "defense":
+            elif _effect_name == "defense":
                 score += effect_value * 0.5
             else:
                 score += effect_value
@@ -543,11 +557,19 @@ def select_best_support_equipment(current_item: dict, equipment_list: list[dict]
     return best_item
 
 
-async def select_best_equipment_set(current_equipments: dict, sorted_valid_equipments: dict[str, list[dict]], vulnerabilities: dict) -> dict[str, dict]:
+async def select_best_equipment_set(
+        current_equipments: dict,
+        sorted_valid_equipments: dict[str, list[dict]],
+        vulnerabilities: dict
+) -> dict[str, dict]:
     selected_equipments = {}
 
     # Sélectionner la meilleure arme (code existant)
-    best_weapon = select_best_weapon(current_equipments.get('weapon', {}), sorted_valid_equipments.get('weapon', []), vulnerabilities)
+    best_weapon = select_best_weapon(
+        current_equipments.get('weapon', {}),
+        sorted_valid_equipments.get('weapon', []),
+        vulnerabilities
+    )
     selected_equipments['weapon'] = best_weapon
 
     # Sélectionner les meilleurs équipements de support en fonction des vulnérabilités
@@ -614,7 +636,11 @@ def select_best_weapon(current_weapon: dict, weapon_list: list[dict], vulnerabil
     return best_weapon
 
 
-async def select_best_equipment(equipment1_infos: dict, sorted_valid_equipments: list[dict], vulnerabilities: dict[str, int]) -> dict:
+async def select_best_equipment(
+        equipment1_infos: dict,
+        sorted_valid_equipments: list[dict],
+        vulnerabilities: dict[str, int]
+) -> dict:
     """
     Selects the best equipment based on monster vulnerability and equipment effects.
 
@@ -691,7 +717,7 @@ class TaskType(Enum):
     RESOURCES = "resources"
     MONSTERS = "monsters"
     ITEMS = "items"
-    RECYCLE = "recycle"     # TODO items with negative total?
+    RECYCLE = "recycle"
     IDLE = "idle"
 
 
@@ -708,6 +734,30 @@ class Task(BaseModel):
 class Status(BaseModel):
     max_level: int
     server_time: str
+
+
+class Craft(BaseModel):
+    skill: str
+    level: int
+    items: list
+
+
+class Item(BaseModel):
+    code: str
+    level: int
+    type: str
+    subtype: str
+    craft: Optional[Craft]
+
+    def is_gatherable(self) -> bool:
+        return self.craft is None and self.type == "resource" and self.subtype in ["mining", "woodcutting", "fishing"]
+
+    def is_from_task(self) -> bool:
+        return self.type == "resource" and self.subtype == "task"
+
+    def is_rare_drop(self) -> bool:
+        # TODO get it dynamic through the drop rate ?
+        return self.code in ['topaz', 'emerald', 'ruby', 'sapphire', 'sap', 'magic_sap', 'diamond']
 
 
 class Environment(BaseModel):
@@ -848,7 +898,7 @@ class Environment(BaseModel):
 
 
 class Character(BaseModel):
-    session: aiohttp.ClientSession
+    session: ClientSession
     environment: Environment
     obsolete_equipments: dict[str, dict]
     name: str
@@ -994,6 +1044,8 @@ class Character(BaseModel):
             if await self.can_be_home_made(resource) and await self.does_item_provide_xp(resource) and resource["code"] not in ["magic_tree", "demon"]
         ]
 
+        self._logger.info(f' RESOURCES OBJECTIVES: {[o["code"] for o in resource_objectives]}')
+
         item_objectives.extend(resource_objectives[::-1])
 
         # Filter according to defined craft skills
@@ -1103,9 +1155,9 @@ class Character(BaseModel):
     async def is_up_to_fight(self):
         got_enough_consumables = await self.got_enough_consumables(-1)
         inventory_not_full = await self.is_inventory_not_full()
-        is_task_complete = await self.is_task_completed()
+        is_goal_completed = await self.is_goal_completed()
         is_not_at_spawn_place = not await self.is_at_spawn_place()
-        return got_enough_consumables and inventory_not_full and not is_task_complete and is_not_at_spawn_place
+        return got_enough_consumables and inventory_not_full and not is_goal_completed and is_not_at_spawn_place
 
     async def is_at_spawn_place(self) -> bool:
         current_location = await self.get_current_location()
@@ -1401,7 +1453,10 @@ class Character(BaseModel):
 
     async def move_to_monster(self, monster_code: str = ""):
         monster_code = self.task.code if monster_code == "" else monster_code
-        coords = await self.get_nearest_coords(content_type='monster', content_code=monster_code)
+        if self.task.is_event:
+            coords = (self.task.x, self.task.y)
+        else:
+            coords = await self.get_nearest_coords(content_type='monster', content_code=monster_code)
         self._logger.debug(f'{self.name} > moving to monster {monster_code} at {coords}')
         cooldown_ = await self.move(*coords)
         await asyncio.sleep(cooldown_)
@@ -1838,6 +1893,9 @@ class Character(BaseModel):
         character_infos = await self.get_infos()
         return character_infos.get("task_progress", "A") == character_infos.get("task_total", "B")
 
+    async def is_goal_completed(self) -> bool:
+        return await self.is_event_still_on() or await self.is_task_completed()
+
     async def get_unnecessary_equipments(self) -> dict[str, int]:
         recycle_details = {}
         # Apply only on those that can be crafted again
@@ -1968,27 +2026,20 @@ class Character(BaseModel):
 
     async def execute_task(self):
 
+        self._logger.info(f" Here is the task to be executed: {self.task.code} ({self.task.type.value})")
+
         # TODO if inventory filled up, deposit?
         self._logger.debug(f' Current inventory occupied slots: {await self.get_inventory_occupied_slots_nb()}')
 
         await self.equip_for_task()
 
         if self.task.type == TaskType.MONSTERS:
-            if self.task.is_event:
-                cooldown_ = await self.move(self.task.x, self.task.y)
+            await self.move_to_monster(self.task.code)
+            self._logger.info(f'fighting {self.task.code} ...')
+            while await self.is_up_to_fight():  # Includes "task completed" check > TODO add dropped material count
+                # TODO decrement task total on each won combat
+                cooldown_ = await self.perform_fighting()
                 await asyncio.sleep(cooldown_)
-                self._logger.info(f'fighting {self.task.code} ...')
-                while await self.is_up_to_fight() and await self.is_event_still_on():  # Includes "task completed" check > TODO add dropped material count
-                    # TODO decrement task total on each won combat
-                    cooldown_ = await self.perform_fighting()
-                    await asyncio.sleep(cooldown_)
-            else:
-                await self.move_to_monster(self.task.code)
-                self._logger.info(f'fighting {self.task.code} ...')
-                while await self.is_up_to_fight():  # Includes "task completed" check > TODO add dropped material count
-                    # TODO decrement task total on each won combat
-                    cooldown_ = await self.perform_fighting()
-                    await asyncio.sleep(cooldown_)
 
         elif self.task.type == TaskType.RESOURCES:
             if self.task.is_event:
@@ -2014,7 +2065,6 @@ class Character(BaseModel):
 
         elif self.task.type == TaskType.RECYCLE:
             await self.withdraw_items_from_bank({self.task.code: self.task.total})
-            # TODO if withdraw fails, continue
             if await self.get_inventory_quantity(self.task.code) >= self.task.total:
                 await self.move_to_workshop()
                 cooldown = await self.perform_recycling(self.task.details, self.task.total)
@@ -2057,7 +2107,7 @@ class Character(BaseModel):
             await self.equip_for_fight()
         elif self.task.type == TaskType.RESOURCES:
             self._logger.debug("Equipping for gathering")
-            await self.equip_for_gathering(self.task.details["skill"])
+            await self.equip_for_gathering(self.task.details["subtype"])
 
     async def get_recycling_task(self) -> Task:
 
@@ -2090,7 +2140,7 @@ class Character(BaseModel):
                 total=recycling_qty,
                 details=self.environment.items[item_code]
             )
-        return None
+        return Task()
 
     async def get_fight_for_leveling_up_task(self) -> Task:
         # If XP can be gained by fighting, go
@@ -2111,7 +2161,7 @@ class Character(BaseModel):
                 total=99,   # FIXME when does it stop?
                 details=highest_fightable_monster
             )
-        return None
+        return Task()
 
     async def get_craft_for_equiping_task(self) -> Task:
         total_quantities = await get_all_items_quantities(self.session)
@@ -2135,7 +2185,7 @@ class Character(BaseModel):
                 total=equipment_min_stock - equipment_qty,
                 details=equipment
             )
-        return None
+        return Task()
 
     async def get_event_task(self) -> Task:
         all_events = await get_all_events(self.session)
@@ -2175,21 +2225,18 @@ class Character(BaseModel):
         if len(eligible_tasks) > 0:
             return eligible_tasks[-1]
 
-        return None
+        return Task()
 
 
 async def run_bot(character_object: Character):
     while True:
 
-        ### DEPOSIT ALL ###
         await character_object.deposit_items_at_bank()
 
         # FIXME Define a stock Task, where the gathering / crafting is made until bank stock is reached
 
-        ## MANAGE TASK ###
         await character_object.manage_task()
 
-        ### SET TASK BEGIN ###
         # Check if game task is feasible, assign if it is / necessarily existing
         event_task = await character_object.get_event_task()
         # event_task = None
@@ -2197,26 +2244,23 @@ async def run_bot(character_object: Character):
         recycling_task = await character_object.get_recycling_task()
         craft_for_equiping_task = await character_object.get_craft_for_equiping_task()
         fight_for_leveling_up_task = await character_object.get_fight_for_leveling_up_task()
-        if event_task is not None:
+        if event_task.type != TaskType.IDLE:
             character_object.task = event_task
         # No need to do game tasks if already a lot of task coins
         elif (await character_object.is_feasible_task(game_task) and (await get_bank_item_qty(character_object.session, "tasks_coin") < 100)) or len(character_object.objectives) == 0:
             character_object.task = game_task
-        elif recycling_task is not None:
+        elif recycling_task.type != TaskType.IDLE:
             character_object.task = recycling_task
         # TODO get a task of leveling up on gathering if craftable items without autonomy
-        elif craft_for_equiping_task is not None:
+        elif craft_for_equiping_task.type != TaskType.IDLE:
             character_object.task = craft_for_equiping_task
-        elif fight_for_leveling_up_task is not None and await character_object.got_enough_consumables(1):
+        elif fight_for_leveling_up_task.type != TaskType.IDLE and await character_object.got_enough_consumables(1):
             character_object.task = fight_for_leveling_up_task
         elif character_object.task.type == TaskType.IDLE:
             # find and assign a valid task
             character_object.task = await character_object.get_task()     # From a list?
         ### SET TASK END ###
 
-        # task_details = await character_object.prepare_for_task()   # Depending on character_object.task.type / including auto_equip
-
-        character_object._logger.warning(f" Here is the task to be executed: {character_object.task.code} ({character_object.task.type.value})")
         await character_object.execute_task()
 
         # Reinitialize task
@@ -2269,17 +2313,23 @@ async def run_bot(character_object: Character):
 # FIXME if there is a task implying fight, make it priority
 
 async def main():
-    async with aiohttp.ClientSession() as session:
+    async with ClientSession() as session:
         # Parallelization of initial API calls
-        tasks = [
+        # tasks = [
+        #     asyncio.create_task(get_all_items(session)),
+        #     asyncio.create_task(get_all_monsters(session)),
+        #     asyncio.create_task(get_all_resources(session)),
+        #     asyncio.create_task(get_all_maps(session)),
+        #     asyncio.create_task(get_all_status(session))
+        # ]
+
+        items_data, monsters_data, resources_data, maps_data, status = await asyncio.gather(*[
             asyncio.create_task(get_all_items(session)),
             asyncio.create_task(get_all_monsters(session)),
             asyncio.create_task(get_all_resources(session)),
             asyncio.create_task(get_all_maps(session)),
             asyncio.create_task(get_all_status(session))
-        ]
-
-        items_data, monsters_data, resources_data, maps_data, status = await asyncio.gather(*tasks)
+        ])
 
         environment = Environment(
             items=items_data,
@@ -2309,8 +2359,8 @@ async def main():
             Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Kersh', max_fight_level=30, skills=['weaponcrafting', 'cooking', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
             Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Capu', max_fight_level=30, skills=['gearcrafting', 'woodcutting', 'mining']),  # 'gearcrafting',
             Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Brubu', max_fight_level=30, skills=['cooking', 'woodcutting', 'mining']),  # , 'fishing', 'mining', 'woodcutting'
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Crabex', max_fight_level=30, skills=['mining', 'woodcutting']),  # 'jewelrycrafting', 'woodcutting', 'mining'
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='JeaGa', max_fight_level=30, skills=['jewelrycrafting', 'mining', 'woodcutting']),  # 'cooking', 'fishing'
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Crabex', max_fight_level=30, skills=['jewelrycrafting', 'mining', 'woodcutting']),  # 'jewelrycrafting', 'woodcutting', 'mining'
+            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='JeaGa', max_fight_level=30, skills=['fishing', 'jewelrycrafting', 'mining', 'woodcutting']),  # 'cooking', 'fishing'
         ]
 
         # Initialize all characters asynchronously
