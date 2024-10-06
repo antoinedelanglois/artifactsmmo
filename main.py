@@ -9,7 +9,7 @@ import os
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, UTC
 
 # Charger les variables d'environnement depuis le fichier .env
 load_dotenv()
@@ -523,7 +523,7 @@ async def get_all_status(session: ClientSession) -> Status:
             "version": "unknown",
             "max_level": 40,
             "characters_online": 0,
-            "server_time": datetime.utcnow(),
+            "server_time": datetime.now(UTC),
             "announcements": [],
             "last_wipe": "",
             "next_wipe": ""
@@ -2287,10 +2287,16 @@ class Character(BaseModel):
             }
 
             # Checking if all is available in inventory
-            if all([(await self.get_inventory_qty()).get(material_code, 0) >= material_qty for material_code, material_qty in craft_details.items()]):
+            if all([
+                (await self.get_inventory_qty()).get(material_code, 0) >= material_qty
+                for material_code, material_qty in craft_details.items()
+            ]):
                 pass
             # Checking if all is available in bank
-            elif all([await get_bank_item_qty(self.session, material_code) >= material_qty for material_code, material_qty in craft_details.items()]):
+            elif all([
+                await get_bank_item_qty(self.session, material_code) >= material_qty
+                for material_code, material_qty in craft_details.items()
+            ]):
                 await self.deposit_items_at_bank()
                 await self.withdraw_items_from_bank(craft_details)
             # Go and get it
@@ -2451,7 +2457,9 @@ async def run_bot(character_object: Character):
         if event_task.type != TaskType.IDLE:
             character_object.task = event_task
         # No need to do game tasks if already a lot of task coins
-        elif (game_task.is_feasible(await character_object.get_infos(), character_object.max_fight_level) and (await get_bank_item_qty(character_object.session, "tasks_coin") < 200)) or len(character_object.objectives) == 0:
+        elif ((game_task.is_feasible(await character_object.get_infos(), character_object.max_fight_level)
+              and (await get_bank_item_qty(character_object.session, "tasks_coin") < 200))
+              or len(character_object.objectives) == 0):
             character_object.task = game_task
         elif recycling_task.type != TaskType.IDLE:
             character_object.task = recycling_task
@@ -2541,9 +2549,12 @@ async def main():
 
             # LOCAL_BANK = await get_bank_items(session)
 
-            # Lich 96% > cursed_specter, gold_shield, cursed_hat, malefic_armor, piggy_pants, gold_boots, ruby_ring, ruby_ring, ruby_amulet
-            # Lich 100% > cursed_specter, gold_shield, cursed_hat, malefic_armor, piggy_pants, gold_boots, ruby_ring, ruby_ring, magic_stone_amulet
-            # Lich > gold_sword, gold_shield, lich_crown, obsidian_armor, gold_platelegs, lizard_boots, dreadful_ring, topaz_ring, topaz_amulet
+            # Lich 96% > cursed_specter, gold_shield, cursed_hat, malefic_armor, piggy_pants, gold_boots, ruby_ring,
+            # ruby_ring, ruby_amulet
+            # Lich 100% > cursed_specter, gold_shield, cursed_hat, malefic_armor, piggy_pants, gold_boots, ruby_ring,
+            # ruby_ring, magic_stone_amulet
+            # Lich > gold_sword, gold_shield, lich_crown, obsidian_armor, gold_platelegs, lizard_boots, dreadful_ring,
+            # topaz_ring, topaz_amulet
 
             # Test filter
             given_items = [
