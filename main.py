@@ -7,7 +7,8 @@ import re
 import os
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
-from typing import Optional
+from typing import List, Optional
+from datetime import datetime
 
 # Charger les variables d'environnement depuis le fichier .env
 load_dotenv()
@@ -162,6 +163,238 @@ class Item(BaseModel):
         return is_craft_skill_compliant or is_gathering_skill_compliant
 
 
+class TaskType(Enum):
+    RESOURCES = "resources"
+    MONSTERS = "monsters"
+    ITEMS = "items"
+    RECYCLE = "recycle"
+    IDLE = "idle"
+
+
+class Task(BaseModel):
+    code: str = ""
+    type: TaskType = TaskType.IDLE
+    total: int = 0
+    details: Item | Monster | Resource = None
+    x: int = 0,
+    y: int = 0,
+    is_event: bool = False
+
+    def is_craft_type(self):
+        return self.type == TaskType.ITEMS
+
+    def is_fight_type(self):
+        return self.type == TaskType.MONSTERS
+
+    def is_gather_type(self):
+        return self.type == TaskType.RESOURCES
+
+    # TODO get max_fight_level from character_infos?
+    def is_feasible(self, character_infos: dict, max_fight_level: int) -> bool:
+        if self.is_fight_type() and self.details.level <= max_fight_level:
+            return True
+        if self.is_craft_type():
+            skill_level_key = f'{self.details.craft.skill}_level'
+            skill_level = character_infos.get(skill_level_key)
+            if skill_level is not None and self.details.level <= skill_level:
+                return True
+        if self.is_gather_type():
+            skill_level_key = f'{self.details.skill}_level'
+            skill_level = character_infos.get(skill_level_key)
+            if skill_level is not None and self.details.level <= skill_level:
+                return True
+        return False
+
+
+class Announcement(BaseModel):
+    message: str
+    created_at: datetime
+
+
+class Status(BaseModel):
+    status: str
+    version: str
+    max_level: int
+    characters_online: int
+    server_time: datetime
+    announcements: List[Announcement]
+    last_wipe: str
+    next_wipe: str
+
+
+class InventoryItem(BaseModel):
+    slot: int
+    code: str
+    quantity: int
+
+
+class CharacterInfos(BaseModel):
+    name: str
+    skin: str
+    level: int
+    xp: int
+    max_xp: int
+    achievements_points: int
+    gold: int
+    speed: int
+    mining_level: int
+    mining_xp: int
+    mining_max_xp: int
+    woodcutting_level: int
+    woodcutting_xp: int
+    woodcutting_max_xp: int
+    fishing_level: int
+    fishing_xp: int
+    fishing_max_xp: int
+    weaponcrafting_level: int
+    weaponcrafting_xp: int
+    weaponcrafting_max_xp: int
+    gearcrafting_level: int
+    gearcrafting_xp: int
+    gearcrafting_max_xp: int
+    jewelrycrafting_level: int
+    jewelrycrafting_xp: int
+    jewelrycrafting_max_xp: int
+    cooking_level: int
+    cooking_xp: int
+    cooking_max_xp: int
+    hp: int
+    haste: int
+    critical_strike: int
+    stamina: int
+    attack_fire: int
+    attack_earth: int
+    attack_water: int
+    attack_air: int
+    dmg_fire: int
+    dmg_earth: int
+    dmg_water: int
+    dmg_air: int
+    res_fire: int
+    res_earth: int
+    res_water: int
+    res_air: int
+    x: int
+    y: int
+    cooldown: int
+    cooldown_expiration: datetime
+    weapon_slot: str
+    shield_slot: str
+    helmet_slot: str
+    body_armor_slot: str
+    leg_armor_slot: str
+    boots_slot: str
+    ring1_slot: str
+    ring2_slot: str
+    amulet_slot: str
+    artifact1_slot: str
+    artifact2_slot: str
+    artifact3_slot: str
+    consumable1_slot: str
+    consumable1_slot_quantity: int
+    consumable2_slot: str
+    consumable2_slot_quantity: int
+    task: str
+    task_type: str
+    task_progress: int
+    task_total: int
+    inventory_max_items: int
+    inventory: List[InventoryItem]
+
+
+class Environment(BaseModel):
+    items: dict[str, Item]
+    monsters: dict[str, Monster]
+    resource_locations: dict[str, Resource]
+    maps: list[dict]
+    status: Status
+    crafted_items: list[Item] = None
+    equipments: dict[str, Item] = None
+    consumables: dict[str, Item] = None
+    dropped_items: list[Item] = None
+
+    # Allow arbitrary types if necessary (e.g., for custom types like Status)
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        self.crafted_items = self.get_crafted_items()
+        self.equipments = self.get_equipments()
+        self.consumables = self.get_consumables()
+        self.dropped_items = self.get_dropped_items()
+
+    def get_craftable_items(self, character_infos: dict) -> list[Item]:
+        return [
+            item
+            for item in self.environment.crafted_items
+            if item.level < character_infos[f'{item.craft.skill}_level']
+        ]
+
+    def get_item_dropping_monsters(self, item_code: str) -> list[tuple[Monster, int]]:
+        item_dropping_monsters = []
+        for monster in self.monsters.values():
+            for item_details in monster.drops:
+                if item_details.code == item_code:
+                    item_dropping_monsters.append((monster, item_details.rate))
+        item_dropping_monsters = sorted(item_dropping_monsters, key=lambda x: x[1], reverse=False)
+        return item_dropping_monsters
+
+    def get_item_dropping_monster(self, item_code: str) -> Optional[Monster]:
+        item_dropping_monsters = self.get_item_dropping_monsters(item_code)
+        if len(item_dropping_monsters) > 0:
+            return item_dropping_monsters[0][0]
+        return None
+
+    def get_item_dropping_locations(self, item_code: str) -> list[tuple[Resource, int]]:
+        item_dropping_locations = []
+        for resource_location in self.resource_locations.values():
+            for drop in resource_location.drops:
+                if drop.code == item_code:
+                    item_dropping_locations.append((resource_location, drop.rate))
+        item_dropping_locations = sorted(item_dropping_locations, key=lambda x: x[1], reverse=False)
+        return item_dropping_locations
+
+    def get_item_dropping_location(self, item_code: str) -> Optional[Resource]:
+        item_dropping_locations = self.get_item_dropping_locations(item_code)
+        if len(item_dropping_locations) > 0:
+            return item_dropping_locations[0][0]
+        return None
+
+    def get_item_dropping_max_rate(self, item_code: str) -> int:
+        item_dropping_locations = self.get_item_dropping_locations(item_code)
+        if len(item_dropping_locations) > 0:
+            return item_dropping_locations[0][1]
+        return 9999
+
+    def get_dropped_items(self) -> list[Item]:
+        return [
+            item
+            for item in self.items.values()
+            if item.is_dropped()
+        ]
+
+    def get_crafted_items(self) -> list[Item]:
+        return [
+            item
+            for _, item in self.items.items()
+            if item.is_crafted()
+        ]
+
+    def get_equipments(self) -> dict[str, Item]:
+        return {
+            item_code: item
+            for item_code, item in self.items.items()
+            if item.is_equipment()
+        }
+
+    def get_consumables(self) -> dict[str, Item]:
+        return {
+            item.code: item
+            for item in self.crafted_items
+            if item.is_consumable()
+        }
+
+
 def handle_incorrect_status_code(_status_code: int) -> str:
     match _status_code:
         case 404: msg = "Item not found"
@@ -216,6 +449,16 @@ async def make_request(session, method, url, params=None, payload=None, retries=
             ) as response:
                 if response.status == 200:
                     return await response.json()
+                elif response.status == 429:
+                    # Handle rate limiting with exponential backoff
+                    # backoff_time = min(2 ** attempt, 60)  # Cap the backoff time at 60 seconds
+                    # logging.warning(f"Rate limited. Retrying after {backoff_time} seconds.")
+                    # await asyncio.sleep(backoff_time)
+                    # Handle rate limiting
+                    retry_after = int(response.headers.get('Retry-After', '1'))
+                    logging.warning(f"Rate limited. Retrying after {retry_after} seconds.")
+                    await asyncio.sleep(retry_after)
+                    continue  # Retry the request
                 elif response.status == 404:
                     logging.error(f"Resource not found at {url}. Aborting further attempts.")
                     break
@@ -332,7 +575,8 @@ def identify_obsolete_equipments(equipment_groups: dict[str, list[Item]]) -> lis
     return obsolete_equipments
 
 
-async def get_obsolete_equipments(session: ClientSession, _items: dict[str, Item]) -> dict[str, Item]:
+async def get_obsolete_equipments(session: ClientSession, _environment: Environment) -> dict[str, Item]:
+    _items = _environment.items
     equipment_groups = get_equipments_by_type(_items)
 
     # Récupérer les quantités des items une seule fois
@@ -781,134 +1025,6 @@ async def select_best_equipment(
     return best_equipment
 
 
-class TaskType(Enum):
-    RESOURCES = "resources"
-    MONSTERS = "monsters"
-    ITEMS = "items"
-    RECYCLE = "recycle"
-    IDLE = "idle"
-
-
-class Task(BaseModel):
-    code: str = ""
-    type: TaskType = TaskType.IDLE
-    total: int = 0
-    details: Item | Monster | Resource = None
-    x: int = 0,
-    y: int = 0,
-    is_event: bool = False
-
-    def is_craft_type(self):
-        return self.type == TaskType.ITEMS
-
-    def is_fight_type(self):
-        return self.type == TaskType.MONSTERS
-
-    def is_gather_type(self):
-        return self.type == TaskType.RESOURCES
-
-    # TODO get max_fight_level from character_infos?
-    def is_feasible(self, character_infos: dict, max_fight_level: int) -> bool:
-        if self.is_fight_type() and self.details.level <= max_fight_level:
-            return True
-        if self.is_craft_type() and self.details.level <= character_infos[f'{self.details.craft.skill}_level']:
-            return True
-        if self.is_gather_type() and self.details.level <= character_infos[f'{self.details.skill}_level']:
-            return True
-        return False
-
-
-class Status(BaseModel):
-    max_level: int
-    server_time: str
-
-
-class Environment(BaseModel):
-    items: dict[str, Item]
-    monsters: dict[str, Monster]
-    resource_locations: dict[str, Resource]
-    maps: list[dict]
-    status: Status
-    crafted_items: list[Item] = None
-    equipments: dict[str, Item] = None
-    consumables: dict[str, Item] = None
-    dropped_items: list[Item] = None
-
-    # Allow arbitrary types if necessary (e.g., for custom types like Status)
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    def __init__(self, **data):
-        super().__init__(**data)
-        self.crafted_items = self.get_crafted_items()
-        self.equipments = self.get_equipments()
-        self.consumables = self.get_consumables()
-        self.dropped_items = self.get_dropped_items()
-
-    def get_item_dropping_monsters(self, item_code: str) -> list[tuple[Monster, int]]:
-        item_dropping_monsters = []
-        for monster in self.monsters.values():
-            for item_details in monster.drops:
-                if item_details.code == item_code:
-                    item_dropping_monsters.append((monster, item_details.rate))
-        item_dropping_monsters = sorted(item_dropping_monsters, key=lambda x: x[1], reverse=False)
-        return item_dropping_monsters
-
-    def get_item_dropping_monster(self, item_code: str) -> Monster:
-        item_dropping_monsters = self.get_item_dropping_monsters(item_code)
-        if len(item_dropping_monsters) > 0:
-            return item_dropping_monsters[0][0]
-        return None
-
-    def get_item_dropping_locations(self, item_code: str) -> list[tuple[Resource, int]]:
-        item_dropping_locations = []
-        for resource_location in self.resource_locations.values():
-            for drop in resource_location.drops:
-                if drop.code == item_code:
-                    item_dropping_locations.append((resource_location, drop.rate))
-        item_dropping_locations = sorted(item_dropping_locations, key=lambda x: x[1], reverse=False)
-        return item_dropping_locations
-
-    def get_item_dropping_location(self, item_code: str) -> Resource:
-        item_dropping_locations = self.get_item_dropping_locations(item_code)
-        if len(item_dropping_locations) > 0:
-            return item_dropping_locations[0][0]
-        return None
-
-    def get_item_dropping_max_rate(self, item_code: str) -> int:
-        item_dropping_locations = self.get_item_dropping_locations(item_code)
-        if len(item_dropping_locations) > 0:
-            return item_dropping_locations[0][1]
-        return 9999
-
-    def get_dropped_items(self) -> list[Item]:
-        return [
-            item
-            for item in self.items.values()
-            if item.is_dropped()
-        ]
-
-    def get_crafted_items(self) -> list[Item]:
-        return [
-            item
-            for _, item in self.items.items()
-            if item.is_crafted()
-        ]
-
-    def get_equipments(self) -> dict[str, Item]:
-        return {
-            item_code: item
-            for item_code, item in self.items.items()
-            if item.is_equipment()
-        }
-
-    def get_consumables(self) -> dict[str, Item]:
-        return {
-            item.code: item
-            for item in self.crafted_items
-            if item.is_consumable()
-        }
-
-
 class Character(BaseModel):
     session: ClientSession
     environment: Environment
@@ -962,11 +1078,11 @@ class Character(BaseModel):
         self.gatherable_resources = gatherable_resources
         self._logger.info(f"Gatherable resources for {self.name}: {[r.code for r in self.gatherable_resources]}")
 
-    async def set_craftable_items(self, infos: dict):
+    async def set_craftable_items(self, character_infos: dict):
         """
         Fetch and set craftable items based on the character's craft skill and level
         """
-        skill_craftable_items = [item for item in self.environment.crafted_items if item.level < infos[f'{item.craft.skill}_level']]
+        skill_craftable_items = self.environment.get_craftable_items(character_infos)
         craftable_items = skill_craftable_items[::-1]
         # TODO exclude protected items (such as the one using jasper_crystal)
 
@@ -1141,6 +1257,8 @@ class Character(BaseModel):
     async def gather_material(self, material_code: str, quantity: int):
 
         resource_location = self.environment.get_item_dropping_location(material_code)
+        if not resource_location:
+            return
         location_coords = await self.get_nearest_coords('resource', resource_location.code)
 
         cooldown_ = await self.move(*location_coords)
@@ -1178,6 +1296,8 @@ class Character(BaseModel):
             return
 
         monster = self.environment.get_item_dropping_monster(material_code)
+        if not monster:
+            return
         await self.move_to_monster(monster.code)
 
         while await self.is_inventory_not_full() and await self.get_inventory_quantity(material_code) < quantity_to_get:
@@ -1473,9 +1593,14 @@ class Character(BaseModel):
         cooldown_ = await self.move(*coords)
         await asyncio.sleep(cooldown_)
 
-    async def get_equipment_code(self, _equipment_slot: str):
+    async def get_equipment_code(self, _equipment_slot: str) -> str:
         infos = await self.get_infos()
-        return infos[f'{_equipment_slot}_slot']
+        key = f'{_equipment_slot}_slot'
+        if key in infos:
+            return infos[key]
+        else:
+            self._logger.warning(f"Equipment slot '{key}' not found in character info.")
+            return ""
 
     async def get_current_equipments(self) -> dict[str, Item]:
         infos = await self.get_infos()
@@ -1488,7 +1613,8 @@ class Character(BaseModel):
     async def go_and_equip(self, _equipment_slot: str, _equipment_code: str):
         current_equipment_code = await self.get_equipment_code(_equipment_slot)
         if current_equipment_code != _equipment_code:
-            self._logger.debug(f' will change equipment for {_equipment_slot} from {current_equipment_code} to {_equipment_code}')
+            self._logger.debug(f' will change equipment for {_equipment_slot} '
+                               f'from {current_equipment_code} to {_equipment_code}')
             await self.withdraw_items_from_bank({_equipment_code: 1})
             if current_equipment_code != "":
                 await self.unequip(_equipment_slot)
@@ -1553,6 +1679,8 @@ class Character(BaseModel):
             self._logger.debug(f'going to fight: {fight_details} ...')
             for item_code, qty in fight_details.items():
                 monster = self.environment.get_item_dropping_monster(item_code)
+                if not monster:
+                    return
                 await self.equip_for_fight(monster)
                 await self.go_and_fight_to_collect(item_code, qty)
         for item_code, qty in _craft_details['gather'].items():
@@ -1839,7 +1967,7 @@ class Character(BaseModel):
 
     async def get_sorted_valid_bank_equipments(self) -> dict[str, list[Item]]:
         bank_items = await get_bank_items(self.session)     # TODO use Item ?
-        bank_equipments ={}
+        bank_equipments = {}
         for equipment_slot in EQUIPMENTS_SLOTS:
             slot_equipments = [
                 self.environment.equipments[item_code]
@@ -2053,6 +2181,8 @@ class Character(BaseModel):
                     await asyncio.sleep(cooldown_)
             else:
                 location_details = self.environment.get_item_dropping_location(self.task.code)
+                if not location_details:
+                    return
                 location_coords = await self.get_nearest_coords('resource', location_details.code)
 
                 cooldown_ = await self.move(*location_coords)
@@ -2338,7 +2468,7 @@ async def main():
             status=status
         )
 
-        obsolete_equipments = await get_obsolete_equipments(session, items)
+        obsolete_equipments = await get_obsolete_equipments(session, environment)
 
         # LOCAL_BANK = await get_bank_items(session)
 
