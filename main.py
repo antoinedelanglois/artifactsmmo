@@ -25,10 +25,23 @@ EQUIPMENTS_SLOTS = ['weapon', 'shield', 'helmet', 'body_armor', 'leg_armor', 'bo
                     'amulet', 'artifact1', 'artifact2', 'artifact3']
 EQUIPMENTS_TYPES = ['weapon', 'shield', 'helmet', 'body_armor', 'leg_armor', 'boots', 'ring',
                     'amulet', 'artifact']
+SLOT_TYPE_MAPPING = {
+    'weapon': ['weapon'],
+    'shield': ['shield'],
+    'helmet': ['helmet'],
+    'body_armor': ['body_armor'],
+    'leg_armor': ['leg_armor'],
+    'boots': ['boots'],
+    'ring': ['ring1', 'ring2'],
+    'amulet': ['amulet'],
+    'artifact': ['artifact1', 'artifact2', 'artifact3'],
+    # Add other mappings if necessary
+}
 EXCLUDED_MONSTERS = ["cultist_acolyte", "cultist_emperor", "lich", "bat"]
 SPAWN_COORDINATES = (0, 0)
 BANK_COORDINATES = (4, 1)
 STOCK_QTY_OBJECTIVE = 500
+API_RATE_LIMIT = 5
 
 
 class Craft(BaseModel):
@@ -419,6 +432,9 @@ def handle_incorrect_status_code(_status_code: int) -> str:
     return msg
 
 
+API_SEMAPHORE = asyncio.Semaphore(API_RATE_LIMIT)
+
+
 async def make_request(session, method, url, params=None, payload=None, retries=3, timeout=120):
     """
     Helper function to make requests with retries, timeouts, and optional query parameters.
@@ -441,53 +457,55 @@ async def make_request(session, method, url, params=None, payload=None, retries=
         "Authorization": f"Bearer {TOKEN}"  # Assumes you have a TOKEN variable
     }
 
-    for attempt in range(retries):
-        try:
-            async with session.request(
-                    method,
-                    url,
-                    headers=headers,
-                    params=params,
-                    json=payload,
-                    timeout=timeout
-            ) as response:
-                if response.status == 200:
-                    return await response.json()
-                elif response.status == 429:
-                    # Handle rate limiting with exponential backoff
-                    # backoff_time = min(2 ** attempt, 60)  # Cap the backoff time at 60 seconds
-                    # logging.warning(f"Rate limited. Retrying after {backoff_time} seconds.")
-                    # await asyncio.sleep(backoff_time)
-                    # Handle rate limiting
-                    retry_after = int(response.headers.get('Retry-After', '1'))
-                    logging.warning(f"Rate limited. Retrying after {retry_after} seconds.")
-                    await asyncio.sleep(retry_after)
-                    continue  # Retry the request
-                elif response.status == 404:
-                    logging.error(f"Resource not found at {url}. Aborting further attempts.")
-                    break
-                elif response.status == 422:
-                    error_data = await response.json()
-                    logging.error(f"422 Error at {url}. Error details: {error_data}")
-                    break
-                elif response.status == 499:
-                    # Handle cooldown (example use case)
-                    response_data = await response.json()
-                    cooldown_time = extract_cooldown_time(response_data.get("error", {}).get("message", ""))
-                    logging.warning(f"Character is in cooldown for {cooldown_time} seconds.")
-                    await asyncio.sleep(cooldown_time + 2)  # Cooldown sleep
-                else:
-                    error_msg = handle_incorrect_status_code(response.status)
-                    logging.warning(f"Request to {url} failed with status {response.status}. {error_msg}. Retrying...")
-        except (asyncio.TimeoutError, ClientConnectorError) as e:
-            logging.exception(f"Request to {url} failed due to {str(e)}. Retrying ({attempt + 1}/{retries})...")
-            await asyncio.sleep(min(2 ** attempt, 60))  # Max sleep time is capped at 60 seconds
-        except Exception as e:
-            logging.error(f"Unexpected error: {str(e)} while making request to {url}.")
-            break  # Break out of the loop if an unexpected error occurs
+    async with API_SEMAPHORE:
 
-    logging.error(f"Failed to make request to {url} after {retries} attempts.")
-    return None
+        for attempt in range(retries):
+            try:
+                async with session.request(
+                        method,
+                        url,
+                        headers=headers,
+                        params=params,
+                        json=payload,
+                        timeout=timeout
+                ) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    elif response.status == 429:
+                        # Handle rate limiting with exponential backoff
+                        # backoff_time = min(2 ** attempt, 60)  # Cap the backoff time at 60 seconds
+                        # logging.warning(f"Rate limited. Retrying after {backoff_time} seconds.")
+                        # await asyncio.sleep(backoff_time)
+                        # Handle rate limiting
+                        retry_after = int(response.headers.get('Retry-After', '1'))
+                        logging.warning(f"Rate limited. Retrying after {retry_after} seconds.")
+                        await asyncio.sleep(retry_after)
+                        continue  # Retry the request
+                    elif response.status == 404:
+                        logging.error(f"Resource not found at {url}. Aborting further attempts.")
+                        break
+                    elif response.status == 422:
+                        error_data = await response.json()
+                        logging.error(f"422 Error at {url}. Error details: {error_data}")
+                        break
+                    elif response.status == 499:
+                        # Handle cooldown (example use case)
+                        response_data = await response.json()
+                        cooldown_time = extract_cooldown_time(response_data.get("error", {}).get("message", ""))
+                        logging.warning(f"Character is in cooldown for {cooldown_time} seconds.")
+                        await asyncio.sleep(cooldown_time + 2)  # Cooldown sleep
+                    else:
+                        error_msg = handle_incorrect_status_code(response.status)
+                        logging.warning(f"Request to {url} failed. Status {response.status}. {error_msg}. Retrying...")
+            except (asyncio.TimeoutError, ClientConnectorError) as e:
+                logging.exception(f"Request to {url} failed due to {str(e)}. Retrying ({attempt + 1}/{retries})...")
+                await asyncio.sleep(min(2 ** attempt, 60))  # Max sleep time is capped at 60 seconds
+            except Exception as e:
+                logging.error(f"Unexpected error: {str(e)} while making request to {url}.")
+                break  # Break out of the loop if an unexpected error occurs
+
+        logging.error(f"Failed to make request to {url} after {retries} attempts.")
+        return None
 
 
 async def get_status(session: ClientSession) -> dict:
@@ -1143,12 +1161,12 @@ class Character(BaseModel):
             if await self.can_be_home_made(item) and await self.does_item_provide_xp(item)
         ]
 
-        need_level_up_craftable_items = [
+        too_high_level_items = [
             item
             for item in self.craftable_items
             if not await self.can_be_home_made(item) and await self.does_item_provide_xp(item)
         ]
-        self._logger.info(f' NEED LEVELING UP OR SPECIAL MATERIALS TO CRAFT: {[o.code for o in need_level_up_craftable_items]}')
+        self._logger.info(f' NEED LEVELING UP OR SPECIAL MATERIALS TO CRAFT: {[o.code for o in too_high_level_items]}')
 
         # Sort items by their rarity in the bank (to prioritize items that are rarer)
         items2bank_qty = {
@@ -1161,7 +1179,8 @@ class Character(BaseModel):
         resource_objectives = [
             resource
             for resource in self.gatherable_resources
-            if await self.can_be_home_made(resource) and await self.does_item_provide_xp(resource) and resource.code not in ["magic_tree", "demon"]
+            if (await self.can_be_home_made(resource) and await self.does_item_provide_xp(resource)
+                and resource.code not in ["magic_tree", "demon"])
         ]
 
         self._logger.info(f' RESOURCES OBJECTIVES: {[o.code for o in resource_objectives]}')
@@ -1451,7 +1470,8 @@ class Character(BaseModel):
                 material_inventory_qty = await self.get_inventory_quantity(material_code)
                 nb_craftable_items = min(material_inventory_qty//qty, nb_craftable_items)
 
-        self._logger.debug(f' nb of craftable items {"from inventory" if from_inventory else ""} for {_item.code} is {nb_craftable_items}')
+        self._logger.debug(f' nb of craftable items {"from inventory" if from_inventory else ""} '
+                           f'for {_item.code} is {nb_craftable_items}')
 
         return nb_craftable_items
 
@@ -1774,7 +1794,11 @@ class Character(BaseModel):
         current_equipments = await self.get_current_equipments()
         sorted_valid_bank_equipments = await self.get_sorted_valid_bank_equipments()
 
-        selected_equipments = await select_best_equipment_set(current_equipments, sorted_valid_bank_equipments, vulnerabilities)
+        selected_equipments = await select_best_equipment_set(
+            current_equipments,
+            sorted_valid_bank_equipments,
+            vulnerabilities
+        )
         for equipment_slot, equipment in selected_equipments.items():
             if equipment is not None:
                 await self.go_and_equip(equipment_slot, equipment.code)
@@ -1905,8 +1929,13 @@ class Character(BaseModel):
         if len(sorted_valid_equipments) == 0:
             return
         current_equipment_infos = self.environment.equipments.get(current_equipment_code, {})
-        new_equipment_details = await select_best_equipment(current_equipment_infos, sorted_valid_equipments, vulnerabilities)
-        self._logger.debug(f' has been assigned {new_equipment_details.get("code", "")} for slot {_equipment_slot} instead of {current_equipment_infos.get("code", "")}')
+        new_equipment_details = await select_best_equipment(
+            current_equipment_infos,
+            sorted_valid_equipments,
+            vulnerabilities
+        )
+        self._logger.debug(f' has been assigned {new_equipment_details.get("code", "")} '
+                           f'for slot {_equipment_slot} instead of {current_equipment_infos.get("code", "")}')
         await self.go_and_equip(_equipment_slot, new_equipment_details.get('code', ""))
 
     async def perform_unequip(self, slot_code: str, qte: int) -> int:
@@ -1949,30 +1978,56 @@ class Character(BaseModel):
         await asyncio.sleep(cooldown_)
 
     async def get_bank_equipments_for_slot(self, equipment_slot: str) -> list[Item]:
+        """
+        Retrieve a list of equipment items from the bank suitable for a specific equipment slot.
+        Args:
+            equipment_slot (str): The equipment slot to match (e.g., 'ring1', 'weapon').
+        Returns:
+            list[Item]: A list of equipment items that can be equipped in the specified slot.
+        """
         bank_items = await get_bank_items(self.session)
-        return [
-            self.environment.equipments[item_code]
-            for item_code in bank_items.keys()
-            # 'ring' in 'ring1'
-            if self.environment.equipments.get(item_code, None) is not None and self.environment.equipments[item_code].type in equipment_slot
-        ]
+        matching_equipments = []
+
+        for item_code in bank_items.keys():
+            equipment = self.environment.equipments.get(item_code)
+            if equipment:
+                # Check if the equipment type matches the slot (e.g., 'ring' in 'ring1')
+                if equipment.type in equipment_slot:
+                    matching_equipments.append(equipment)
+
+        return matching_equipments
 
     async def get_sorted_valid_bank_equipments(self) -> dict[str, list[Item]]:
-        bank_items = await get_bank_items(self.session)     # TODO use Item ?
-        bank_equipments = {}
-        for equipment_slot in EQUIPMENTS_SLOTS:
-            slot_equipments = [
-                self.environment.equipments[item_code]
-                for item_code in bank_items.keys()
-                # 'ring' in 'ring1'
-                if self.environment.equipments.get(item_code, None) is not None and self.environment.equipments[item_code].type in equipment_slot
-            ]
-            sorted_slot_equipments = sorted([
-                equipment
-                for equipment in slot_equipments
-                if equipment.is_valid_equipment(await self.get_level())
-            ], key=lambda x: x.level, reverse=True)
-            bank_equipments[equipment_slot] = sorted_slot_equipments
+        """
+        Retrieves a dictionary mapping equipment slots to sorted lists of valid equipment items from the bank.
+
+        Returns:
+            dict[str, list[Item]]: A dictionary where keys are equipment slots and values are lists of Items.
+        """
+        bank_items = await get_bank_items(self.session)
+        level = await self.get_level()
+
+        # Create a mapping from equipment slots to lists of equipments
+        bank_equipments = {slot: [] for slot in EQUIPMENTS_SLOTS}
+
+        # Iterate over bank items and categorize them
+        for item_code in bank_items.keys():
+            equipment = self.environment.equipments.get(item_code)
+            if equipment and equipment.is_valid_equipment(level):
+                equipment_type = equipment.type
+                slots = SLOT_TYPE_MAPPING.get(equipment_type, [])
+                for slot in slots:
+                    if slot in EQUIPMENTS_SLOTS:
+                        bank_equipments[slot].append(equipment)
+
+        # Sort equipments for each slot
+        for slot in bank_equipments:
+            bank_equipments[slot] = sorted(
+                bank_equipments[slot],
+                key=lambda x: x.level,
+                reverse=True
+            )
+
         return bank_equipments
 
     async def manage_task(self):
