@@ -256,16 +256,20 @@ class Character(BaseModel):
             await asyncio.sleep(cooldown_)
 
     async def is_up_to_gather(self, _material_code: str, target_qty: int):
-        inventory_items = await self.get_inventory_items()
+        inventory_items, is_inventory_full = await asyncio.gather(
+            self.get_inventory_items(),
+            self.is_inventory_full()
+        )
         gathered_qty = inventory_items.get(_material_code, 0)
-        is_inventory_full = await self.is_inventory_full()
         return not is_inventory_full and gathered_qty < target_qty
 
     async def is_up_to_fight(self) -> bool:
-        got_enough_consumables = await self.got_enough_consumables(-1)
-        is_inventory_full = await self.is_inventory_full()
-        is_goal_completed = await self.is_goal_completed()
-        is_at_spawn_place = await self.is_at_spawn_place()
+        got_enough_consumables, is_inventory_full, is_goal_completed, is_at_spawn_place = await asyncio.gather(
+            self.got_enough_consumables(-1),
+            self.is_inventory_full(),
+            self.is_goal_completed(),
+            self.is_at_spawn_place()
+        )
         up_to_fight = got_enough_consumables and not (is_inventory_full or is_goal_completed or is_at_spawn_place)
         self._logger.debug(f' up to fight? {up_to_fight}')
         return up_to_fight
