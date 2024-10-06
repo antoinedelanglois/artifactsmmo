@@ -476,7 +476,7 @@ async def make_request(session, method, url, params=None, payload=None, retries=
                     error_msg = handle_incorrect_status_code(response.status)
                     logging.warning(f"Request to {url} failed with status {response.status}. {error_msg}. Retrying...")
         except (asyncio.TimeoutError, ClientConnectorError) as e:
-            logging.error(f"Request to {url} failed due to {str(e)}. Retrying ({attempt + 1}/{retries})...")
+            logging.exception(f"Request to {url} failed due to {str(e)}. Retrying ({attempt + 1}/{retries})...")
             await asyncio.sleep(min(2 ** attempt, 60))  # Max sleep time is capped at 60 seconds
         except Exception as e:
             logging.error(f"Unexpected error: {str(e)} while making request to {url}.")
@@ -2442,61 +2442,94 @@ async def run_bot(character_object: Character):
 # FIXME if there is a task implying fight, make it priority
 
 async def main():
-    async with ClientSession() as session:
-        # Parallelization of initial API calls
-        # tasks = [
-        #     asyncio.create_task(get_all_items(session)),
-        #     asyncio.create_task(get_all_monsters(session)),
-        #     asyncio.create_task(get_all_resources(session)),
-        #     asyncio.create_task(get_all_maps(session)),
-        #     asyncio.create_task(get_all_status(session))
-        # ]
 
-        items, monsters, resources_data, maps_data, status = await asyncio.gather(*[
-            asyncio.create_task(get_all_items(session)),
-            asyncio.create_task(get_all_monsters(session)),
-            asyncio.create_task(get_all_resources(session)),
-            asyncio.create_task(get_all_maps(session)),
-            asyncio.create_task(get_all_status(session))
-        ])
+    try:
+        async with ClientSession() as session:
+            # Parallelization of initial API calls
+            items, monsters, resources_data, maps_data, status = await asyncio.gather(*[
+                asyncio.create_task(get_all_items(session)),
+                asyncio.create_task(get_all_monsters(session)),
+                asyncio.create_task(get_all_resources(session)),
+                asyncio.create_task(get_all_maps(session)),
+                asyncio.create_task(get_all_status(session))
+            ])
 
-        environment = Environment(
-            items=items,
-            monsters=monsters,
-            resource_locations=resources_data,
-            maps=maps_data,
-            status=status
-        )
+            environment = Environment(
+                items=items,
+                monsters=monsters,
+                resource_locations=resources_data,
+                maps=maps_data,
+                status=status
+            )
 
-        obsolete_equipments = await get_obsolete_equipments(session, environment)
+            obsolete_equipments = await get_obsolete_equipments(session, environment)
 
-        # LOCAL_BANK = await get_bank_items(session)
+            # LOCAL_BANK = await get_bank_items(session)
 
-        # Lich 96% > cursed_specter, gold_shield, cursed_hat, malefic_armor, piggy_pants, gold_boots, ruby_ring, ruby_ring, ruby_amulet
-        # Lich 100% > cursed_specter, gold_shield, cursed_hat, malefic_armor, piggy_pants, gold_boots, ruby_ring, ruby_ring, magic_stone_amulet
-        # Lich > gold_sword, gold_shield, lich_crown, obsidian_armor, gold_platelegs, lizard_boots, dreadful_ring, topaz_ring, topaz_amulet
+            # Lich 96% > cursed_specter, gold_shield, cursed_hat, malefic_armor, piggy_pants, gold_boots, ruby_ring, ruby_ring, ruby_amulet
+            # Lich 100% > cursed_specter, gold_shield, cursed_hat, malefic_armor, piggy_pants, gold_boots, ruby_ring, ruby_ring, magic_stone_amulet
+            # Lich > gold_sword, gold_shield, lich_crown, obsidian_armor, gold_platelegs, lizard_boots, dreadful_ring, topaz_ring, topaz_amulet
 
-        # Test filter
-        given_items = [
-            item
-            for item in items.values()
-            if item.is_given()
-        ]
-        logging.warning(f"Equipments that can only be given or dropped: {list(map(lambda x: x.code, given_items))}")
+            # Test filter
+            given_items = [
+                item
+                for item in items.values()
+                if item.is_given()
+            ]
+            logging.warning(f"Equipments that can only be given or dropped: {list(map(lambda x: x.code, given_items))}")
 
-        characters_ = [
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Kersh', max_fight_level=30, skills=['weaponcrafting', 'cooking', 'mining', 'woodcutting']),  # 'weaponcrafting', 'mining', 'woodcutting'
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Capu', max_fight_level=30, skills=['gearcrafting', 'woodcutting', 'mining']),  # 'gearcrafting',
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Brubu', max_fight_level=30, skills=['cooking', 'woodcutting', 'mining']),  # , 'fishing', 'mining', 'woodcutting'
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='Crabex', max_fight_level=30, skills=['jewelrycrafting', 'mining', 'woodcutting']),  # 'jewelrycrafting', 'woodcutting', 'mining'
-            Character(session=session, environment=environment, obsolete_equipments=obsolete_equipments, name='JeaGa', max_fight_level=30, skills=['fishing', 'jewelrycrafting', 'mining', 'woodcutting']),  # 'cooking', 'fishing'
-        ]
+            characters_ = [
+                Character(
+                    session=session,
+                    environment=environment,
+                    obsolete_equipments=obsolete_equipments,
+                    name='Kersh',
+                    max_fight_level=30,
+                    skills=['weaponcrafting', 'cooking', 'mining', 'woodcutting']
+                ),  # 'weaponcrafting', 'mining', 'woodcutting'
+                Character(
+                    session=session,
+                    environment=environment,
+                    obsolete_equipments=obsolete_equipments,
+                    name='Capu',
+                    max_fight_level=30,
+                    skills=['gearcrafting', 'woodcutting', 'mining']
+                ),  # 'gearcrafting',
+                Character(
+                    session=session,
+                    environment=environment,
+                    obsolete_equipments=obsolete_equipments,
+                    name='Brubu',
+                    max_fight_level=30,
+                    skills=['cooking', 'woodcutting', 'mining']
+                ),  # , 'fishing', 'mining', 'woodcutting'
+                Character(
+                    session=session,
+                    environment=environment,
+                    obsolete_equipments=obsolete_equipments,
+                    name='Crabex',
+                    max_fight_level=30,
+                    skills=['jewelrycrafting', 'mining', 'woodcutting']
+                ),  # 'jewelrycrafting', 'woodcutting', 'mining'
+                Character(
+                    session=session,
+                    environment=environment,
+                    obsolete_equipments=obsolete_equipments,
+                    name='JeaGa',
+                    max_fight_level=30,
+                    skills=['fishing', 'jewelrycrafting', 'mining', 'woodcutting']
+                ),  # 'cooking', 'fishing'
+            ]
 
-        # Initialize all characters asynchronously
-        await asyncio.gather(*[character.initialize() for character in characters_])
+            # Initialize all characters asynchronously
+            await asyncio.gather(*[character.initialize() for character in characters_])
 
-        # Start the bot for all characters
-        await asyncio.gather(*[run_bot(character) for character in characters_])
+            # Start the bot for all characters
+            await asyncio.gather(*[run_bot(character) for character in characters_])
+
+    except Exception as e:
+        logging.exception("An unexpected error occurred in the main function.")
+
 
 if __name__ == '__main__':
 
