@@ -343,7 +343,7 @@ class Environment(BaseModel):
     def get_craftable_items(self, character_infos: dict) -> list[Item]:
         return [
             item
-            for item in self.environment.crafted_items
+            for item in self.crafted_items
             if item.level < character_infos[f'{item.craft.skill}_level']
         ]
 
@@ -514,11 +514,11 @@ async def get_status(session: ClientSession) -> dict:
     return data["data"] if data else {}
 
 
-async def get_all_status(session: ClientSession) -> dict:
+async def get_all_status(session: ClientSession) -> Status:
     status_data = await get_status(session)
     if not status_data:
         # Handle the case where status_data is None or empty
-        return {
+        return Status(**{
             "status": "unknown",
             "version": "unknown",
             "max_level": 40,
@@ -527,7 +527,7 @@ async def get_all_status(session: ClientSession) -> dict:
             "announcements": [],
             "last_wipe": "",
             "next_wipe": ""
-        }
+        })
 
     # Convert server_time to datetime if necessary
     server_time = status_data.get("server_time")
@@ -538,7 +538,7 @@ async def get_all_status(session: ClientSession) -> dict:
     announcements_data = status_data.get("announcements", [])
     announcements = [Announcement(**a) for a in announcements_data]
 
-    return {
+    return Status(**{
         "status": status_data.get("status", ""),
         "version": status_data.get("version", ""),
         "max_level": status_data.get("max_level", 40),
@@ -547,7 +547,7 @@ async def get_all_status(session: ClientSession) -> dict:
         "announcements": announcements,
         "last_wipe": status_data.get("last_wipe", ""),
         "next_wipe": status_data.get("next_wipe", "")
-    }
+    })
 
 
 def extract_cooldown_time(message):
