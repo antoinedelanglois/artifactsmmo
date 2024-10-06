@@ -263,15 +263,21 @@ class Character(BaseModel):
         gathered_qty = inventory_items.get(_material_code, 0)
         return not is_inventory_full and gathered_qty < target_qty
 
-    async def is_up_to_fight(self) -> bool:
-        got_enough_consumables, is_inventory_full, is_goal_completed, is_at_spawn_place = await asyncio.gather(
+    async def is_up_to_fight(self, is_event: bool = False) -> bool:
+        got_enough_consumables, is_inventory_full, is_event_still_on, is_at_spawn_place, is_task_completed = await asyncio.gather(
             self.got_enough_consumables(-1),
             self.is_inventory_full(),
-            self.is_goal_completed(),
-            self.is_at_spawn_place()
+            self.is_event_still_on(),
+            self.is_at_spawn_place(),
+            self.is_task_completed()
         )
-        up_to_fight = got_enough_consumables and not (is_inventory_full or is_goal_completed or is_at_spawn_place)
-        self._logger.debug(f' up to fight? {up_to_fight}')
+        if is_event:
+            up_to_fight = got_enough_consumables and is_event_still_on and not (is_inventory_full or is_at_spawn_place)
+        else:
+            up_to_fight = got_enough_consumables and not (is_inventory_full or is_task_completed or is_at_spawn_place)
+        self._logger.debug(f' up to fight? {up_to_fight}: consumables: {got_enough_consumables}'
+                          f' is_inventory_full: {is_inventory_full} / is_event_still_on: {is_event_still_on} / '
+                          f'is_task_completed: {is_task_completed} / is_at_spawn_place: {is_at_spawn_place}')
         return up_to_fight
 
     async def is_at_spawn_place(self) -> bool:
@@ -1043,13 +1049,6 @@ class Character(BaseModel):
         character_infos = await self.get_infos()
         return character_infos.get("task_progress", "A") == character_infos.get("task_total", "B")
 
-    async def is_goal_completed(self) -> bool:
-        is_event_still_on = await self.is_event_still_on()
-        self._logger.debug(f' Event is still on? {is_event_still_on}')
-        is_task_completed = await self.is_task_completed()
-        self._logger.debug(f' Task is completed? {is_task_completed}')
-        return not is_event_still_on or is_task_completed
-
     async def get_unnecessary_equipments(self) -> dict[str, int]:
         recycle_details = {}
         # Apply only on those that can be crafted again
@@ -1190,7 +1189,7 @@ class Character(BaseModel):
         if self.task.type == TaskType.MONSTERS:
             await self.move_to_monster(self.task.code)
             self._logger.info(f'fighting {self.task.code} ...')
-            while await self.is_up_to_fight():  # Includes "task completed" check > TODO add dropped material count
+            while await self.is_up_to_fight(is_event=self.task.is_event):  # TODO add dropped material count
                 # TODO decrement task total on each won combat
                 cooldown_ = await self.perform_fighting()
                 await asyncio.sleep(cooldown_)
