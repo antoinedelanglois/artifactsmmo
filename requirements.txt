@@ -3,3 +3,4 @@ asyncio
 nest_asyncio
 python-dotenv
 pydantic
+pytz

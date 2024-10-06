@@ -9,7 +9,10 @@ import os
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 from typing import List, Optional
-from datetime import datetime, UTC
+from datetime import datetime
+import pytz
+
+UTC = pytz.UTC
 
 # Charger les variables d'environnement depuis le fichier .env
 load_dotenv()
