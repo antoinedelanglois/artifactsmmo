@@ -515,10 +515,38 @@ async def get_status(session: ClientSession) -> dict:
 
 
 async def get_all_status(session: ClientSession) -> dict:
-    status = await get_status(session)
+    status_data = await get_status(session)
+    if not status_data:
+        # Handle the case where status_data is None or empty
+        return {
+            "status": "unknown",
+            "version": "unknown",
+            "max_level": 40,
+            "characters_online": 0,
+            "server_time": datetime.utcnow(),
+            "announcements": [],
+            "last_wipe": "",
+            "next_wipe": ""
+        }
+
+    # Convert server_time to datetime if necessary
+    server_time = status_data.get("server_time")
+    if isinstance(server_time, str):
+        server_time = datetime.fromisoformat(server_time.replace("Z", "+00:00"))
+
+    # Process announcements if they are provided
+    announcements_data = status_data.get("announcements", [])
+    announcements = [Announcement(**a) for a in announcements_data]
+
     return {
-        "max_level": status.get("max_level", 40),
-        "server_time": status.get("server_time", "")
+        "status": status_data.get("status", ""),
+        "version": status_data.get("version", ""),
+        "max_level": status_data.get("max_level", 40),
+        "characters_online": status_data.get("characters_online", 0),
+        "server_time": server_time,
+        "announcements": announcements,
+        "last_wipe": status_data.get("last_wipe", ""),
+        "next_wipe": status_data.get("next_wipe", "")
     }
 
 
