@@ -1,6 +1,7 @@
 import asyncio
 from enum import Enum
 import logging
+from logging.handlers import RotatingFileHandler
 from aiohttp import ClientSession
 from aiohttp.client_exceptions import ClientConnectorError
 import re
@@ -25,6 +26,9 @@ EQUIPMENTS_SLOTS = ['weapon', 'shield', 'helmet', 'body_armor', 'leg_armor', 'bo
 EQUIPMENTS_TYPES = ['weapon', 'shield', 'helmet', 'body_armor', 'leg_armor', 'boots', 'ring',
                     'amulet', 'artifact']
 EXCLUDED_MONSTERS = ["cultist_acolyte", "cultist_emperor", "lich", "bat"]
+SPAWN_COORDINATES = (0, 0)
+BANK_COORDINATES = (4, 1)
+STOCK_QTY_OBJECTIVE = 500
 
 
 class Craft(BaseModel):
@@ -717,12 +721,6 @@ async def get_all_map_item_qty(session: ClientSession, _item: Item, total_quanti
     return total_quantities.get(_item.code, 0)
 
 
-def get_min_stock_qty(item: Item) -> int:
-    if item.type == "ring":
-        return 10
-    return 5
-
-
 async def get_all_resources(session: ClientSession, params: dict = None) -> dict[str, Resource]:
     """
     Retrieves all resources from the API.
@@ -1032,7 +1030,7 @@ class Character(BaseModel):
     name: str
     skills: list[str]
     max_fight_level: int = 0
-    stock_qty_objective: int = 500
+    stock_qty_objective: int = STOCK_QTY_OBJECTIVE
     task: Task = Field(default_factory=Task)
     gatherable_resources: list[Item] = Field(default_factory=list)
     craftable_items: list[Item] = Field(default_factory=list)
@@ -1278,14 +1276,14 @@ class Character(BaseModel):
 
     async def is_up_to_fight(self):
         got_enough_consumables = await self.got_enough_consumables(-1)
-        inventory_not_full = await self.is_inventory_not_full()
+        inventory_not_full = not await self.is_inventory_full()
         is_goal_completed = await self.is_goal_completed()
         is_not_at_spawn_place = not await self.is_at_spawn_place()
         return got_enough_consumables and inventory_not_full and not is_goal_completed and is_not_at_spawn_place
 
     async def is_at_spawn_place(self) -> bool:
         current_location = await self.get_current_location()
-        if current_location == (0, 0):
+        if current_location == SPAWN_COORDINATES:
             self._logger.debug(f'is already at spawn place - likely killed by a monster')
             return True
         return False
@@ -1300,7 +1298,7 @@ class Character(BaseModel):
             return
         await self.move_to_monster(monster.code)
 
-        while await self.is_inventory_not_full() and await self.get_inventory_quantity(material_code) < quantity_to_get:
+        while not await self.is_inventory_full() and await self.get_inventory_quantity(material_code) < quantity_to_get:
             cooldown_ = await self.perform_fighting()
             await asyncio.sleep(cooldown_)
 
@@ -1347,16 +1345,13 @@ class Character(BaseModel):
             if i_infos['code'] != ""
         }
 
-    async def is_inventory_not_full(self) -> bool:
-        infos = await self.get_infos()
-        return sum([
-            i_infos['quantity']
-            for i_infos in infos.get('inventory', [])
-        ]) < await self.get_inventory_max_size()
+    async def is_inventory_full(self) -> bool:
+        return await self.get_inventory_occupied_slots_nb() >= await self.get_inventory_max_size()
 
     async def get_current_location(self) -> tuple[int, int]:
         infos = await self.get_infos()
-        return int(infos.get('x', 0)), int(infos.get('y', 0))   # Default to (0, 0)
+        default_x, default_y = SPAWN_COORDINATES
+        return int(infos.get('x', default_x)), int(infos.get('y', default_y))
 
     async def complete_task(self):
         url = f"{SERVER}/my/{self.name}/action/task/complete"
@@ -1422,7 +1417,7 @@ class Character(BaseModel):
                 'content_code': content_code
             }
         )
-        nearest_resource = {'x': 4, 'y': 1}     # Default to bank
+        nearest_resource = {'x': BANK_COORDINATES[0], 'y': BANK_COORDINATES[1]}     # Default to bank
         if len(resource_locations) == 0:
             self._logger.warning(f'No resource {content_code} on this map')
             return nearest_resource['x'], nearest_resource['y']
@@ -1441,11 +1436,8 @@ class Character(BaseModel):
         return nearest_resource['x'], nearest_resource['y']
 
     async def get_inventory_quantity(self, _item_code: str) -> int:
-        character_infos = await self.get_infos()
-        for item_infos in character_infos.get('inventory', []):
-            if item_infos['code'] == _item_code:
-                return item_infos['quantity']
-        return 0
+        inventory_items = await self.get_inventory_items()
+        return inventory_items.get(_item_code, 0)
 
     async def get_nb_craftable_items(self, _item: Item, from_inventory: bool = False) -> int:
 
@@ -2308,7 +2300,7 @@ class Character(BaseModel):
             self._logger.warning(f' New equipments to craft: {[e.code for e in craftable_new_equipments]}')
             equipment = craftable_new_equipments[0]
             equipment_qty = await get_all_map_item_qty(self.session, equipment)
-            equipment_min_stock = get_min_stock_qty(equipment)
+            equipment_min_stock = equipment.get_min_stock_qty()
             self._logger.warning(f' Got {equipment_qty} {equipment.code} on map, need at least {equipment_min_stock}')
             return Task(
                 code=equipment.code,
@@ -2538,7 +2530,7 @@ if __name__ == '__main__':
         level=logging.INFO,
         format="%(asctime)s - %(name)s - [%(levelname)s] %(message)s",
         handlers=[
-            logging.FileHandler("logs/output.log"),
+            RotatingFileHandler("logs/output.log", maxBytes=5*1024*1024, backupCount=5),
             logging.StreamHandler()
         ]
     )
