@@ -1674,8 +1674,8 @@ class Character(BaseModel):
         # Filter equipments that have effects matching the gathering skill
         valid_equipments = []
         for equipment in bank_equipments:
-            for effect in equipment.get('effects', []):
-                if effect['name'] == gathering_skill:
+            for effect in equipment.effects:
+                if effect.name == gathering_skill:
                     valid_equipments.append(equipment)
                     break  # No need to check other effects
 
@@ -1694,10 +1694,10 @@ class Character(BaseModel):
             return
 
         # Sort equipments based on the effect value for the gathering skill
-        def get_effect_value(_equipment, effect_name):
-            for _effect in _equipment.get('effects', []):
-                if _effect['name'] == effect_name:
-                    return _effect['value']
+        def get_effect_value(_equipment: Item, effect_name: str):
+            for _effect in _equipment.effects:
+                if _effect.name == effect_name:
+                    return _effect.value
             return 0
 
         # Adjusted sorting: sort in ascending order since more negative is better
@@ -1724,7 +1724,7 @@ class Character(BaseModel):
                 await self.equip_for_fight(monster)
                 await self.go_and_fight_to_collect(item_code, qty)
         for item_code, qty in _craft_details['gather'].items():
-            await self.equip_for_gathering(self.environment.items[item_code]["subtype"])
+            await self.equip_for_gathering(self.environment.items[item_code].subtype)
             await self.gather_material(item_code, qty)
         collect_details = _craft_details['collect']
         if sum([qty for _, qty in collect_details.items()]) > 0:
@@ -2319,7 +2319,7 @@ class Character(BaseModel):
             await self.equip_for_fight()
         elif self.task.type == TaskType.RESOURCES:
             self._logger.debug("Equipping for gathering")
-            await self.equip_for_gathering(self.task.details["subtype"])
+            await self.equip_for_gathering(self.task.details.skill)
 
     async def get_recycling_task(self) -> Task:
 
@@ -2471,7 +2471,6 @@ async def run_bot(character_object: Character):
         elif character_object.task.type == TaskType.IDLE:
             # find and assign a valid task
             character_object.task = await character_object.get_task()     # From a list?
-        ### SET TASK END ###
 
         await character_object.execute_task()
 
@@ -2614,7 +2613,7 @@ async def main():
             await asyncio.gather(*[run_bot(character) for character in characters_])
 
     except Exception as e:
-        logging.exception("An unexpected error occurred in the main function.")
+        logging.exception(f"An unexpected error occurred in the main function. Error: {e}")
 
 
 if __name__ == '__main__':
