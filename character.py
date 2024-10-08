@@ -13,7 +13,7 @@ import logging
 class Character(BaseModel):
     session: ClientSession
     environment: Environment
-    obsolete_equipments: dict[str, dict]
+    obsolete_equipments: dict[str, Item]
     name: str
     skills: list[str]
     max_fight_level: int = 0
