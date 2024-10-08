@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 import pytz
 from constants import SERVER, EQUIPMENTS_SLOTS
+import random
 
 UTC = pytz.UTC
 
@@ -73,7 +74,6 @@ async def make_request(session, method, url, params=None, payload=None, retries=
     }
 
     async with API_SEMAPHORE:
-
         for attempt in range(retries):
             try:
                 async with session.request(
@@ -87,14 +87,12 @@ async def make_request(session, method, url, params=None, payload=None, retries=
                     if response.status == 200:
                         return await response.json()
                     elif response.status == 429:
-                        # Handle rate limiting with exponential backoff
-                        # backoff_time = min(2 ** attempt, 60)  # Cap the backoff time at 60 seconds
-                        # logging.warning(f"Rate limited. Retrying after {backoff_time} seconds.")
-                        # await asyncio.sleep(backoff_time)
-                        # Handle rate limiting
+                        # Implementing exponential backoff with jitter
                         retry_after = int(response.headers.get('Retry-After', '1'))
-                        logging.warning(f"Rate limited. Retrying after {retry_after} seconds.")
-                        await asyncio.sleep(retry_after)
+                        backoff_time = min(2 ** attempt + random.uniform(0, 1), 60)  # Add jitter
+                        logging.warning(f"Rate limited. "
+                                        f"Retrying after {backoff_time} seconds (Retry-After: {retry_after}).")
+                        await asyncio.sleep(max(backoff_time, retry_after))
                         continue  # Retry the request
                     elif response.status == 404:
                         logging.error(f"Resource not found at {url}. Aborting further attempts.")
@@ -112,9 +110,16 @@ async def make_request(session, method, url, params=None, payload=None, retries=
                     else:
                         error_msg = handle_incorrect_status_code(response.status)
                         logging.warning(f"Request to {url} failed. Status {response.status}. {error_msg}. Retrying...")
-            except (asyncio.TimeoutError, ClientConnectorError) as e:
-                logging.exception(f"Request to {url} failed due to {str(e)}. Retrying ({attempt + 1}/{retries})...")
-                await asyncio.sleep(min(2 ** attempt, 60))  # Max sleep time is capped at 60 seconds
+            except asyncio.TimeoutError as e:
+                logging.exception(f"Request to {url} timed out. Retrying ({attempt + 1}/{retries})... ({e})")
+                await asyncio.sleep(min(2 ** attempt, 60))
+            except ClientConnectorError as e:
+                logging.exception(f"Connection error while accessing {url}: "
+                                  f"{str(e)}. Retrying ({attempt + 1}/{retries})...")
+                await asyncio.sleep(min(2 ** attempt, 60))
+            except asyncio.CancelledError:
+                logging.error("Request was cancelled. Cleaning up...")
+                raise  # Re-raise to ensure proper task cancellation handling
             except Exception as e:
                 logging.error(f"Unexpected error: {str(e)} while making request to {url}.")
                 break  # Break out of the loop if an unexpected error occurs
