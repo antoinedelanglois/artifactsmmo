@@ -427,7 +427,7 @@ class Environment(BaseModel):
         return [
             item
             for item in self.crafted_items
-            if item.level < character_infos[f'{item.craft.skill}_level']
+            if item.level <= character_infos[f'{item.craft.skill}_level']
         ]
 
     def get_item_dropping_monsters(self, item_code: str) -> list[tuple[Monster, int]]:
