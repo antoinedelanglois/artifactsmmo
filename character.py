@@ -1144,11 +1144,15 @@ class Character(BaseModel):
                 self._logger.debug(f' Fightable for qty {qty}')
                 continue
             self._logger.warning(f" Material {material_code} won't provide XP...")
-        return {
+
+        craft_details = {
             'gather': gather_details,
             'collect': collect_details,
             'fight': fight_details
         }
+        self._logger.debug(f' {craft_details=}')
+
+        return craft_details
 
     async def is_event_still_on(self):
         all_events = await get_all_events(self.session)
@@ -1249,7 +1253,7 @@ class Character(BaseModel):
             await self.equip_for_fight()
         elif self.task.type == TaskType.RESOURCES:
             self._logger.debug("Equipping for gathering")
-            await self.equip_for_gathering(self.task.details.skill)
+            await self.equip_for_gathering(self.task.details.subtype)
 
     async def get_recycling_task(self) -> Task:
 

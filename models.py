@@ -260,7 +260,7 @@ class Item(BaseModel):
 
         skill_level_key = f'{item_skill_name}_level' if item_skill_name else 'level'
         skill_level = character_infos.get(skill_level_key)
-        return skill_level is not None and item_skill_level - 10 <= self.level and item_skill_level < max_level
+        return skill_level is not None and skill_level - 10 <= item_skill_level and skill_level < max_level
 
 
 def is_equipment_better(equipment_a: Item, equipment_b: Item) -> bool:
@@ -427,7 +427,7 @@ class Environment(BaseModel):
         return [
             item
             for item in self.crafted_items
-            if item.level < character_infos[f'{item.craft.skill}_level']
+            if item.level <= character_infos[f'{item.craft.skill}_level']
         ]
 
     def get_item_dropping_monsters(self, item_code: str) -> list[tuple[Monster, int]]:
