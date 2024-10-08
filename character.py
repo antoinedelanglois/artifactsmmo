@@ -123,17 +123,30 @@ class Character(BaseModel):
             self._logger.warning(f' {item.code} to categorize')
 
     async def set_objectives(self):
+
+        xp_item_codes = [
+            item.code
+            for item in self.craftable_items + self.gatherable_resources
+            if item.does_provide_xp(await self.get_infos(), self.environment.status.max_level)
+        ]
+
+        home_made_item_codes = [
+            item.code
+            for item in self.craftable_items + self.gatherable_resources
+            if await self.can_be_home_made(item)
+        ]
+
         # Out of craftable items, which one can be handled autonomously
         objectives = [
             item
             for item in self.craftable_items
-            if await self.can_be_home_made(item) and await self.does_item_provide_xp(item)
+            if item.code in home_made_item_codes and item.code in xp_item_codes
         ]
 
         too_high_level_items = [
             item
             for item in self.craftable_items
-            if not await self.can_be_home_made(item) and await self.does_item_provide_xp(item)
+            if item.code not in home_made_item_codes and item.code in xp_item_codes
         ]
         self._logger.info(f' NEED LEVELING UP OR SPECIAL MATERIALS TO CRAFT: {[o.code for o in too_high_level_items]}')
 
@@ -148,7 +161,7 @@ class Character(BaseModel):
         resource_objectives = [
             resource
             for resource in self.gatherable_resources
-            if (await self.can_be_home_made(resource) and await self.does_item_provide_xp(resource)
+            if (resource.code in home_made_item_codes and resource.code in xp_item_codes
                 and resource.code not in ["magic_tree", "demon"])
         ]
 
@@ -166,7 +179,8 @@ class Character(BaseModel):
         fight_objectives = [
             monster
             for monster in self.fightable_monsters
-            if await self.can_be_vanquished(monster) and await self.does_fight_provide_xp(monster)
+            if (await self.can_be_vanquished(monster)
+                and monster.does_provide_xp(await self.get_infos(), self.environment.status.max_level))
         ]
 
         self.objectives = item_objectives
@@ -276,8 +290,8 @@ class Character(BaseModel):
         else:
             up_to_fight = got_enough_consumables and not (is_inventory_full or is_task_completed or is_at_spawn_place)
         self._logger.debug(f' up to fight? {up_to_fight}: consumables: {got_enough_consumables}'
-                          f' is_inventory_full: {is_inventory_full} / is_event_still_on: {is_event_still_on} / '
-                          f'is_task_completed: {is_task_completed} / is_at_spawn_place: {is_at_spawn_place}')
+                           f' is_inventory_full: {is_inventory_full} / is_event_still_on: {is_event_still_on} / '
+                           f'is_task_completed: {is_task_completed} / is_at_spawn_place: {is_at_spawn_place}')
         return up_to_fight
 
     async def is_at_spawn_place(self) -> bool:
@@ -702,35 +716,6 @@ class Character(BaseModel):
 
         return material2deposit_qty
 
-    async def does_item_provide_xp(self, _item: Item) -> bool:
-        """
-        Determine if a given item will provide XP when crafted, gathered, or fished.
-        This depends on the item's level compared to the character's skill level.
-        """
-        # Check if the item is craftable
-        if _item.craft:
-            skill_name = _item.craft.skill
-        else:
-            # Non-craftable items are checked by subtype (gathering, fishing, etc.)
-            skill_name = _item.subtype
-
-        # If there's no valid skill (item can't be crafted or gathered), it provides no XP
-        if not skill_name:
-            return False
-
-        # Get the character's skill level for the relevant skill (crafting, gathering, etc.)
-        skill_level = await self.get_skill_level(skill_name)
-
-        # Item level must be within range of skill level to provide XP (e.g., within 10 levels)
-        item_level = _item.level
-
-        # Example threshold: if item is within 10 levels of the character's skill level, it gives XP
-        return item_level >= (skill_level - 10) and skill_level < self.environment.status.max_level
-
-    async def does_fight_provide_xp(self, monster: Monster) -> bool:
-        character_level = await self.get_level()
-        return monster.level >= (character_level - 10) and character_level < self.environment.status.max_level
-
     async def select_eligible_targets(self) -> list[str]:
         """
         Select eligible targets (tasks) for the character, ensuring that they will gain XP from them.
@@ -757,10 +742,6 @@ class Character(BaseModel):
         self.craftable_items = sorted(valid_craftable_items, key=lambda x: items2bank_qty.get(x.code, 0), reverse=False)
 
         return [item.code for item in self.craftable_items]
-
-    async def is_valid_equipment(self, _equipment: Item) -> bool:
-        character_level = await self.get_level()
-        return character_level >= _equipment.level
 
     async def equip_for_fight(self, _monster: Monster = None):
 
