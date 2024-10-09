@@ -4,7 +4,7 @@ from logging.handlers import RotatingFileHandler
 from aiohttp import ClientSession
 from character import Character
 from api import (get_bank_item_qty, get_all_maps, get_all_items, get_all_monsters, get_all_resources, get_all_status,
-                 get_all_items_quantities)
+                 get_all_items_quantities, get_all_bank_details)
 from models import Environment, Task, TaskType
 
 
@@ -98,12 +98,13 @@ async def main():
     try:
         async with ClientSession() as session:
             # Parallelization of initial API calls
-            items, monsters, resources_data, maps_data, status = await asyncio.gather(*[
+            items, monsters, resources_data, maps_data, status, bank_details = await asyncio.gather(*[
                 asyncio.create_task(get_all_items(session)),
                 asyncio.create_task(get_all_monsters(session)),
                 asyncio.create_task(get_all_resources(session)),
                 asyncio.create_task(get_all_maps(session)),
-                asyncio.create_task(get_all_status(session))
+                asyncio.create_task(get_all_status(session)),
+                asyncio.create_task(get_all_bank_details(session))
             ])
 
             environment = Environment(
@@ -111,7 +112,8 @@ async def main():
                 monsters=monsters,
                 resource_locations=resources_data,
                 maps=maps_data,
-                status=status
+                status=status,
+                bank_details=bank_details
             )
 
             all_items_quantities = await get_all_items_quantities(session)
@@ -125,14 +127,6 @@ async def main():
             # ruby_ring, magic_stone_amulet
             # Lich > gold_sword, gold_shield, lich_crown, obsidian_armor, gold_platelegs, lizard_boots, dreadful_ring,
             # topaz_ring, topaz_amulet
-
-            # Test filter
-            given_items = [
-                item
-                for item in items.values()
-                if item.is_given()
-            ]
-            logging.warning(f"Equipments that can only be given or dropped: {list(map(lambda x: x.code, given_items))}")
 
             characters_ = [
                 Character(
@@ -173,7 +167,7 @@ async def main():
                     obsolete_equipments=obsolete_equipments,
                     name='JeaGa',
                     max_fight_level=30,
-                    skills=['fishing', 'jewelrycrafting', 'mining', 'woodcutting']
+                    skills=['fishing', 'mining', 'woodcutting']
                 ),  # 'cooking', 'fishing'
             ]
 

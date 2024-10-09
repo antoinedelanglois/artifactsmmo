@@ -85,7 +85,7 @@ class Character(BaseModel):
             if item.code not in excluded_item_codes
         ]
         self.craftable_items = filtered_craftable_items
-        self._logger.warning(f"Craftable items for {self.name}: {[i.code for i in self.craftable_items]}")
+        self._logger.info(f"Craftable items for {self.name}: {[i.code for i in self.craftable_items]}")
 
     async def set_fightable_monsters(self):
         """
@@ -359,7 +359,7 @@ class Character(BaseModel):
         }
 
     async def is_inventory_full(self) -> bool:
-        return await self.get_inventory_occupied_slots_nb() >= await self.get_inventory_max_size()
+        return await self.get_inventory_free_slots_nb() == 0
 
     async def get_current_location(self) -> tuple[int, int]:
         infos = await self.get_infos()
@@ -456,8 +456,8 @@ class Character(BaseModel):
 
         craft_recipee = _item.get_craft_recipee()
         self._logger.debug(f' recipee for {_item.code} is {craft_recipee}')
-        total_nb_materials = sum([qty for _, qty in craft_recipee.items()])
-        nb_craftable_items = await self.get_inventory_max_size() // total_nb_materials
+
+        nb_craftable_items = _item.get_max_taskable_quantity(await self.get_inventory_max_size())
 
         if from_inventory:  # Taking into account drops > update qty available in inventory
             for material_code, qty in craft_recipee.items():
@@ -1036,7 +1036,7 @@ class Character(BaseModel):
         for item_code, item_qty in (await get_bank_items(self.session)).items():
             # No recycling for planks and ores and cooking
             item = self.environment.items[item_code]
-            if item.is_not_recyclable():
+            if item_qty == 0 or item.is_not_recyclable():
                 continue
             min_qty = item.get_min_stock_qty()
             if item.is_crafted() and item_qty > min_qty:
@@ -1079,29 +1079,23 @@ class Character(BaseModel):
             return self.objectives[0]
         return self.environment.items["iron"]
 
-    async def set_task(self, item: Item, task_type: TaskType, quantity: int):
-        total_nb_materials = item.get_nb_ingredients()
+    async def set_task(self, item: Item):
         self.task = Task(
             code=item.code,
-            type=task_type,
-            total=min(await self.get_inventory_max_size(), quantity) // total_nb_materials,
+            type=item.get_task_type(),
+            total=item.get_max_taskable_quantity(await self.get_inventory_max_size()),
             details=item
         )
 
     async def get_task(self) -> Task:
 
         objective = await self.get_best_objective()     # FIXME get it depending on potential XP gain
-
         # FIXME could be checked here amongst craftable items first, then gatherable ones
-
-        # objective is an item > task will be crafting or gathering
-        total_nb_materials = objective.get_nb_ingredients()
-        task_qty = (await self.get_inventory_max_size()) // total_nb_materials
 
         return Task(
             code=objective.code,
             type=objective.get_task_type(),
-            total=task_qty,
+            total=objective.get_max_taskable_quantity(await self.get_inventory_max_size()),
             details=objective
         )
 
@@ -1128,12 +1122,8 @@ class Character(BaseModel):
                 # Set material as craft target
                 self._logger.info(f' Resetting task to {material_code}')
                 # FIXME  Replace qty by full inventory capacity ?
-                await self.set_task(
-                    self.environment.items[material_code],
-                    TaskType.ITEMS,
-                    # await self.get_inventory_max_size()
-                    qty
-                )
+                material = self.environment.items[material_code]
+                await self.set_task(material)
                 return await self.prepare_for_task()
             if await self.is_gatherable(material_code):
                 gather_details[material_code] = qty
@@ -1164,7 +1154,8 @@ class Character(BaseModel):
 
     async def execute_task(self):
 
-        self._logger.info(f" Here is the task to be executed: {self.task.code} ({self.task.type.value})")
+        self._logger.info(f" Here is the task to be executed: "
+                          f"{self.task.code} ({self.task.type.value}: {self.task.total})")
 
         # TODO if inventory filled up, deposit?
         self._logger.debug(f' Current inventory occupied slots: {await self.get_inventory_occupied_slots_nb()}')
@@ -1258,13 +1249,29 @@ class Character(BaseModel):
     async def get_recycling_task(self) -> Task:
 
         # TODO only one loop on bank equipment
+        # Check if we need slots in bank first
+        nb_occupied_bank_slots = len(await get_bank_items(self.session))
+        if nb_occupied_bank_slots > self.environment.bank_details.slots - 5:
 
-        for item_code in self.obsolete_equipments:
-            qty_at_bank = await get_bank_item_qty(self.session, item_code)
-            if qty_at_bank > 0:
-                # If yes, withdraw them and get to workshop to recycle them, before getting back to bank to deposit all
+            for item_code in self.obsolete_equipments:
+                qty_at_bank = await get_bank_item_qty(self.session, item_code)
+                if qty_at_bank > 0:
+                    # If yes, withdraw them and get to workshop to recycle, before getting back to bank to deposit all
+                    nb_free_inventory_slots = await self.get_inventory_free_slots_nb()
+                    recycling_qty = min(qty_at_bank, nb_free_inventory_slots // 2)  # Need room when recycling
+
+                    # set recycling task
+                    return Task(
+                        code=item_code,
+                        type=TaskType.RECYCLE,
+                        total=recycling_qty,
+                        details=self.environment.items[item_code]
+                    )
+
+            recycle_details = await self.get_unnecessary_equipments()
+            for item_code, recycling_qty in recycle_details.items():
                 nb_free_inventory_slots = await self.get_inventory_free_slots_nb()
-                recycling_qty = min(qty_at_bank, nb_free_inventory_slots // 2)  # Need room in inventory when recycling
+                recycling_qty = min(recycling_qty, nb_free_inventory_slots // 2)  # Need room when recycling
 
                 # set recycling task
                 return Task(
@@ -1274,18 +1281,6 @@ class Character(BaseModel):
                     details=self.environment.items[item_code]
                 )
 
-        recycle_details = await self.get_unnecessary_equipments()
-        for item_code, recycling_qty in recycle_details.items():
-            nb_free_inventory_slots = await self.get_inventory_free_slots_nb()
-            recycling_qty = min(recycling_qty, nb_free_inventory_slots // 2)  # Need room in inventory when recycling
-
-            # set recycling task
-            return Task(
-                code=item_code,
-                type=TaskType.RECYCLE,
-                total=recycling_qty,
-                details=self.environment.items[item_code]
-            )
         return Task()
 
     async def get_fight_for_leveling_up_task(self) -> Task:

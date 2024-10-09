@@ -183,6 +183,10 @@ class Item(BaseModel):
             return TaskType.RESOURCES
         return TaskType.ITEMS
 
+    # TODO use CharacterInfos
+    def get_max_taskable_quantity(self, inventory_max_size: int) -> int:
+        return inventory_max_size // self.get_nb_ingredients()
+
     def has_protected_ingredients(self) -> bool:
         craft_recipee = self.get_craft_recipee()
         ingredients = list(craft_recipee.keys())
@@ -379,12 +383,20 @@ class Status(BaseModel):
     next_wipe: str
 
 
+class BankDetails(BaseModel):
+    slots: int = 0
+    expansions: int = 0
+    next_expansion_cost: int = 0
+    gold: int = 0
+
+
 class Environment(BaseModel):
     items: dict[str, Item]
     monsters: dict[str, Monster]
     resource_locations: dict[str, Resource]
     maps: list[dict]
     status: Status
+    bank_details: BankDetails
     crafted_items: list[Item] = None
     equipments: dict[str, Item] = None
     consumables: dict[str, Item] = None

@@ -1,7 +1,7 @@
 import logging
 import asyncio
 from aiohttp import ClientSession
-from models import Status, Item, Monster, Resource, Announcement
+from models import Status, Item, Monster, Resource, Announcement, BankDetails
 from aiohttp.client_exceptions import ClientConnectorError
 import os
 import re
@@ -286,6 +286,17 @@ async def get_all_items(session: ClientSession, params: dict = None) -> dict[str
         else:
             break
     return {item.code: item for item in items}
+
+
+async def get_bank_details(session: ClientSession) -> dict[str, int]:
+    url = f"{SERVER}/my/bank/"
+    data = await make_request(session=session, method='GET', url=url)
+    return data["data"] if data else {}
+
+
+async def get_all_bank_details(session: ClientSession) -> BankDetails:
+    bank_details_data = await get_bank_details(session)
+    return BankDetails(**bank_details_data)
 
 
 async def get_bank_items(session: ClientSession, params: dict = None) -> dict:
