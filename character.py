@@ -1127,7 +1127,13 @@ class Character(BaseModel):
             if await self.is_craftable(material_code):
                 # Set material as craft target
                 self._logger.info(f' Resetting task to {material_code}')
-                await self.set_task(self.environment.items[material_code], TaskType.ITEMS, qty)
+                # FIXME  Replace qty by full inventory capacity ?
+                await self.set_task(
+                    self.environment.items[material_code],
+                    TaskType.ITEMS,
+                    # await self.get_inventory_max_size()
+                    qty
+                )
                 return await self.prepare_for_task()
             if await self.is_gatherable(material_code):
                 gather_details[material_code] = qty
