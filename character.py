@@ -1062,12 +1062,10 @@ class Character(BaseModel):
             task_details = self.environment.items.get(task, {})
         else:
             # FIXME define a DefaultTask?
-            return Task(
-                code="iron",
-                type=TaskType.ITEMS,
-                total=44,
-                details=self.environment.items["iron"]
-            )
+            task = "iron"
+            task_type = TaskType.ITEMS
+            task_total = 66
+            task_details = self.environment.items["iron"]
         return Task(
             code=task,
             type=task_type,
