@@ -5,6 +5,14 @@ from datetime import datetime
 from constants import EQUIPMENTS_TYPES
 
 
+class TaskType(Enum):
+    RESOURCES = "resources"
+    MONSTERS = "monsters"
+    ITEMS = "items"
+    RECYCLE = "recycle"
+    IDLE = "idle"
+
+
 class InventoryItem(BaseModel):
     slot: int
     code: str
@@ -170,6 +178,11 @@ class Item(BaseModel):
     craft: Optional[Craft] = None
     ge: Optional[Ge] = None
 
+    def get_task_type(self) -> TaskType:
+        if self.is_gatherable():
+            return TaskType.RESOURCES
+        return TaskType.ITEMS
+
     def has_protected_ingredients(self) -> bool:
         craft_recipee = self.get_craft_recipee()
         ingredients = list(craft_recipee.keys())
@@ -313,14 +326,6 @@ def identify_obsolete_equipments(equipment_groups: dict[str, list[Item]]) -> lis
             else:
                 obsolete_equipments.append(equipment)
     return obsolete_equipments
-
-
-class TaskType(Enum):
-    RESOURCES = "resources"
-    MONSTERS = "monsters"
-    ITEMS = "items"
-    RECYCLE = "recycle"
-    IDLE = "idle"
 
 
 class Task(BaseModel):
