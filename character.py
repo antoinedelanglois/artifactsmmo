@@ -19,7 +19,7 @@ class Character(BaseModel):
     max_fight_level: int = 0
     stock_qty_objective: int = STOCK_QTY_OBJECTIVE
     task: Task = Field(default_factory=Task)
-    gatherable_resources: list[Item] = Field(default_factory=list)
+    gatherable_items: list[Item] = Field(default_factory=list)
     craftable_items: list[Item] = Field(default_factory=list)
     fightable_monsters: list[Monster] = Field(default_factory=list)
     fightable_materials: list[Item] = Field(default_factory=list)
@@ -60,8 +60,8 @@ class Character(BaseModel):
                 if self.environment.get_item_dropping_max_rate(item_code) <= 100:
                     gatherable_resources.append(item)
 
-        self.gatherable_resources = gatherable_resources
-        self._logger.info(f"Gatherable resources for {self.name}: {[r.code for r in self.gatherable_resources]}")
+        self.gatherable_items = gatherable_resources
+        self._logger.info(f"Gatherable resources for {self.name}: {[r.code for r in self.gatherable_items]}")
 
     async def set_craftable_items(self, character_infos: dict):
         """
@@ -109,7 +109,7 @@ class Character(BaseModel):
 
     async def can_be_home_made(self, item: Item) -> bool:
         if item.is_gatherable():
-            return item.code in [i.code for i in self.gatherable_resources]
+            return item.code in [i.code for i in self.gatherable_items]
         elif item.is_dropped():
             return item.code in [i.code for i in self.fightable_materials]
         elif item.is_crafted():
@@ -126,13 +126,13 @@ class Character(BaseModel):
 
         xp_item_codes = [
             item.code
-            for item in self.craftable_items + self.gatherable_resources
+            for item in self.craftable_items + self.gatherable_items
             if item.does_provide_xp(await self.get_infos(), self.environment.status.max_level)
         ]
 
         home_made_item_codes = [
             item.code
-            for item in self.craftable_items + self.gatherable_resources
+            for item in self.craftable_items + self.gatherable_items
             if await self.can_be_home_made(item)
         ]
 
@@ -160,7 +160,7 @@ class Character(BaseModel):
 
         resource_objectives = [
             resource
-            for resource in self.gatherable_resources
+            for resource in self.gatherable_items
             if (resource.code in home_made_item_codes and resource.code in xp_item_codes
                 and resource.code not in ["magic_tree", "demon"])
         ]
@@ -563,7 +563,7 @@ class Character(BaseModel):
             return 0
 
     async def is_gatherable(self, resource_code) -> bool:
-        return resource_code in [item.code for item in self.gatherable_resources]
+        return resource_code in [item.code for item in self.gatherable_items]
 
     async def is_fightable(self, material_code) -> bool:
         return material_code in [item.code for item in self.fightable_materials]
@@ -724,7 +724,7 @@ class Character(BaseModel):
         self._logger.debug(f"Selecting eligible targets for {self.name}")
 
         # Filter items that are valid and provide XP (this includes craftable, gatherable, and fishable items)
-        valid_craftable_items = self.gatherable_resources
+        valid_craftable_items = self.gatherable_items
 
         # Log eligible items
         self._logger.debug(f'Eligible items for XP: {[item.code for item in valid_craftable_items]}')
