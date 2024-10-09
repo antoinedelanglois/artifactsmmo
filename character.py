@@ -577,7 +577,7 @@ class Character(BaseModel):
 
     async def move_to_workshop(self):
         # get the skill out of item
-        skill_name = self.task.details.craft.skill
+        skill_name = self.task.details.get_skill_name()
         coords = await self.get_nearest_coords(content_type='workshop', content_code=skill_name)
         self._logger.debug(f'{self.name} > moving to workshop at {coords}')
         cooldown_ = await self.move(*coords)
@@ -1244,7 +1244,7 @@ class Character(BaseModel):
             await self.equip_for_fight()
         elif self.task.type == TaskType.RESOURCES:
             self._logger.debug("Equipping for gathering")
-            await self.equip_for_gathering(self.task.details.subtype)
+            await self.equip_for_gathering(self.task.details.get_skill_name())
 
     async def get_recycling_task(self) -> Task:
 
