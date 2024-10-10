@@ -181,6 +181,14 @@ class Item(BaseModel):
     craft: Optional[Craft] = None
     ge: Optional[Ge] = None
 
+    @staticmethod
+    def get_event_craft_items():
+        return ['strangold', 'obsidian', 'magical_plank']
+
+    @staticmethod
+    def get_event_gather_items():
+        return ['strange_ore', 'piece_of_obsidian', 'magic_wood']
+
     def get_task_type(self) -> TaskType:
         if self.is_gatherable():
             return TaskType.RESOURCES
@@ -209,6 +217,9 @@ class Item(BaseModel):
 
     def is_from_task(self) -> bool:
         return self.type == "resource" and self.subtype == "task"
+
+    def is_from_event(self) -> bool:
+        return self.code in Item.get_event_gather_items() or self.code in Item.get_event_craft_items()
 
     def is_rare_drop(self) -> bool:
         # TODO get it dynamic through the drop rate ?

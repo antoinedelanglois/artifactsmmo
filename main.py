@@ -174,6 +174,8 @@ async def main():
             # Initialize all characters asynchronously
             await asyncio.gather(*[character.initialize() for character in characters_])
 
+            # Add stocking objectives to characters depending on their crafting objectives
+
             # Start the bot for all characters
             await asyncio.gather(*[run_bot(character) for character in characters_])
 

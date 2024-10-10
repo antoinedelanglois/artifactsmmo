@@ -24,6 +24,8 @@ class Character(BaseModel):
     fightable_monsters: list[Monster] = Field(default_factory=list)
     fightable_materials: list[Item] = Field(default_factory=list)
     objectives: list[Item] = Field(default_factory=list)
+    craft_objectives: list[Item] = Field(default_factory=list)
+    gather_objectives: list[Item] = Field(default_factory=list)
     fight_objectives: list[Monster] = Field(default_factory=list)
     # infos: dict = Field(default_factory=dict)
 
@@ -43,25 +45,31 @@ class Character(BaseModel):
         # TODO add also check on inventory and on task status?
         infos = await self.get_infos()
         await asyncio.gather(
-            self.set_gatherable_resources(infos),
+            self.set_gatherable_items(infos),
             self.set_craftable_items(infos),
             self.set_fightable_monsters()
         )
         await self.set_objectives()
 
-    async def set_gatherable_resources(self, infos: dict):
+    async def set_gatherable_items(self, infos: dict):
         """
         Fetch and set gatherable resources based on the character's collect skill and level
         """
-        gatherable_resources = []
+        gatherable_items = [
+            item
+            for item in self.environment.items.values()
+            if (item.is_gatherable()
+                and item.level <= infos[f'{item.subtype}_level']
+                and self.environment.get_item_dropping_max_rate(item.code) <= 100)
+        ]
 
-        for item_code, item in self.environment.items.items():
-            if item.is_gatherable() and item.level <= infos[f'{item.subtype}_level']:
-                if self.environment.get_item_dropping_max_rate(item_code) <= 100:
-                    gatherable_resources.append(item)
+        # for item_code, item in self.environment.items.items():
+        #     if item.is_gatherable() and item.level <= infos[f'{item.subtype}_level']:
+        #         if self.environment.get_item_dropping_max_rate(item_code) <= 100:
+        #             gatherable_items.append(item)
 
-        self.gatherable_items = gatherable_resources
-        self._logger.info(f"Gatherable resources for {self.name}: {[r.code for r in self.gatherable_items]}")
+        self.gatherable_items = gatherable_items
+        self._logger.info(f"Gatherable items for {self.name}: {[r.code for r in self.gatherable_items]}")
 
     async def set_craftable_items(self, character_infos: dict):
         """
@@ -72,9 +80,9 @@ class Character(BaseModel):
         # TODO exclude protected items (such as the one using jasper_crystal)
 
         excluded_item_codes = []
-        for item_code in ['strangold', 'obsidian', 'magical_plank']:
+        for item_code in Item.get_event_craft_items():
             for material_code in self.environment.items[item_code].get_craft_recipee():
-                if material_code in ['strange_ore', 'piece_of_obsidian', 'magic_wood']:
+                if material_code in Item.get_event_gather_items():
                     if await get_bank_item_qty(self.session, material_code) < self.stock_qty_objective:
                         excluded_item_codes.append(item_code)
                         continue
@@ -137,7 +145,7 @@ class Character(BaseModel):
         ]
 
         # Out of craftable items, which one can be handled autonomously
-        objectives = [
+        craft_objectives = [
             item
             for item in self.craftable_items
             if item.code in home_made_item_codes and item.code in xp_item_codes
@@ -153,38 +161,41 @@ class Character(BaseModel):
         # Sort items by their rarity in the bank (to prioritize items that are rarer)
         items2bank_qty = {
             craftable_item.code: await get_bank_item_qty(self.session, craftable_item.code)
-            for craftable_item in objectives
+            for craftable_item in craft_objectives
         }
 
-        item_objectives = sorted(objectives, key=lambda x: items2bank_qty.get(x.code, 0), reverse=False)
+        craft_objectives = sorted(craft_objectives, key=lambda x: items2bank_qty.get(x.code, 0), reverse=False)
 
-        resource_objectives = [
+        gather_objectives = [
             resource
             for resource in self.gatherable_items
             if (resource.code in home_made_item_codes and resource.code in xp_item_codes
-                and resource.code not in ["magic_tree", "demon"])
-        ]
+                and not resource.is_from_event())
+        ][::-1]
 
-        self._logger.info(f' RESOURCES OBJECTIVES: {[o.code for o in resource_objectives]}')
-
-        item_objectives.extend(resource_objectives[::-1])
+        self._logger.info(f' GATHER OBJECTIVES: {[o.code for o in gather_objectives]}')
 
         # Filter according to defined craft skills
-        item_objectives = [
+        self.craft_objectives = [
             item
-            for item in item_objectives
+            for item in craft_objectives
             if item.is_skill_compliant(self.skills)
         ]
 
-        fight_objectives = [
+        self.gather_objectives = [
+            item
+            for item in gather_objectives
+            if item.is_skill_compliant(self.skills)
+        ]
+
+        self.fight_objectives = [
             monster
             for monster in self.fightable_monsters
             if (await self.can_be_vanquished(monster)
                 and monster.does_provide_xp(await self.get_infos(), self.environment.status.max_level))
-        ]
+        ][::-1]
 
-        self.objectives = item_objectives
-        self.fight_objectives = fight_objectives[::-1]
+        self.objectives = self.craft_objectives + self.gather_objectives
         self._logger.info(f' CAN GET XP WITH: {[o.code for o in self.objectives]}')
 
     async def can_be_vanquished(self, monster: Monster) -> bool:
@@ -278,7 +289,8 @@ class Character(BaseModel):
         return not is_inventory_full and gathered_qty < target_qty
 
     async def is_up_to_fight(self, is_event: bool = False) -> bool:
-        got_enough_consumables, is_inventory_full, is_event_still_on, is_at_spawn_place, is_task_completed = await asyncio.gather(
+        (got_enough_consumables, is_inventory_full, is_event_still_on,
+         is_at_spawn_place, is_task_completed) = await asyncio.gather(
             self.got_enough_consumables(-1),
             self.is_inventory_full(),
             self.is_event_still_on(),
