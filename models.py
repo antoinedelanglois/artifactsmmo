@@ -291,6 +291,11 @@ class Item(BaseModel):
 
         skill_level_key = f'{item_skill_name}_level' if item_skill_name else 'level'
         skill_level = character_infos.get(skill_level_key)
+
+        # If character is already maxxed, focus on higher level items (that can be used/sold)
+        if skill_level == max_level:
+            return item_skill_level == skill_level
+
         return skill_level is not None and skill_level - 10 <= item_skill_level and skill_level < max_level
 
 
