@@ -13,8 +13,6 @@ async def run_bot(character_object: Character):
 
         await character_object.deposit_items_at_bank()
 
-        # FIXME Define a stock Task, where the gathering / crafting is made until bank stock is reached
-
         await character_object.manage_task()
 
         # Check if game task is feasible, assign if it is / necessarily existing
@@ -46,6 +44,7 @@ async def run_bot(character_object: Character):
 
         # Reinitialize task
         character_object.task = Task()
+        await character_object.initialize()
 
 
 # class Market:
@@ -175,6 +174,8 @@ async def main():
             await asyncio.gather(*[character.initialize() for character in characters_])
 
             # Add stocking objectives to characters depending on their crafting objectives
+
+            # FIXME Define a stock Task, where the gathering / crafting is made until bank stock is reached
 
             # Start the bot for all characters
             await asyncio.gather(*[run_bot(character) for character in characters_])

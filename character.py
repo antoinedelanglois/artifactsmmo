@@ -1089,7 +1089,7 @@ class Character(BaseModel):
         await self.set_objectives()
         if len(self.objectives) > 0:
             return self.objectives[0]
-        return self.environment.items["iron"]
+        return self.craftable_items[0]
 
     async def set_task(self, item: Item):
         self.task = Task(
