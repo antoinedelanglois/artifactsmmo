@@ -463,11 +463,12 @@ class Environment(BaseModel):
         ]
 
     def get_item_dropping_monsters(self, item_code: str) -> list[tuple[Monster, int]]:
-        item_dropping_monsters = []
-        for monster in self.monsters.values():
-            for item_details in monster.drops:
-                if item_details.code == item_code:
-                    item_dropping_monsters.append((monster, item_details.rate))
+        item_dropping_monsters = [
+            (monster, item_details.rate)
+            for monster in self.monsters.values()
+            for item_details in monster.drops
+            if item_details.code == item_code
+        ]
         item_dropping_monsters = sorted(item_dropping_monsters, key=lambda x: x[1], reverse=False)
         return item_dropping_monsters
 
