@@ -166,6 +166,9 @@ class Resource(BaseModel):
     level: int
     drops: list[Drop]
 
+    def get_skill_name(self):
+        return self.skill
+
 
 class Item(BaseModel):
     name: str
