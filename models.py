@@ -95,6 +95,15 @@ class CharacterInfos(BaseModel):
     def get_level(self) -> int:
         return self.level
 
+    def get_gold_amount(self) -> int:
+        return self.gold
+
+    def got_enough_consumables(self, min_qty: int):
+        # TODO min_qty can be an attribute linked to fight target (depending on difficulty)
+        consumable1_qty = self.consumable1_slot_quantity
+        consumable2_qty = self.consumable2_slot_quantity
+        return consumable1_qty + consumable2_qty > min_qty
+
     # TODO use enum for _equipment_slot
     def get_equipment_code(self, _equipment_slot: str) -> str:
         return self.get_slot_content(_equipment_slot)

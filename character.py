@@ -51,6 +51,9 @@ class Character(BaseModel):
         )
         await self.set_objectives()
 
+    async def get_infos(self) -> CharacterInfos:
+        return await get_all_infos(self.session, self.name)
+
     async def set_gatherable_items(self, character_infos: CharacterInfos):
         """
         Fetch and set gatherable resources based on the character's collect skill and level
@@ -130,7 +133,7 @@ class Character(BaseModel):
         xp_item_codes = [
             item.code
             for item in self.craftable_items + self.gatherable_items
-            if item.does_provide_xp(await get_all_infos(self.session, self.name), self.environment.status.max_level)
+            if item.does_provide_xp(await self.get_infos(), self.environment.status.max_level)
         ]
 
         home_made_item_codes = [
@@ -187,7 +190,7 @@ class Character(BaseModel):
             monster
             for monster in self.fightable_monsters
             if (await self.can_be_vanquished(monster)
-                and monster.does_provide_xp(await get_all_infos(self.session, self.name),
+                and monster.does_provide_xp(await self.get_infos(),
                                             self.environment.status.max_level))
         ][::-1]
 
@@ -206,7 +209,7 @@ class Character(BaseModel):
         await asyncio.sleep(cooldown_)
 
     async def deposit_items_at_bank(self, _items_details: dict[str, int] = None):
-        infos = await get_all_infos(self.session, self.name)
+        infos = await self.get_infos()
         if infos.get_inventory_occupied_slots_nb() > 0:
             # Go to bank and deposit all objects
             # Move to the bank
@@ -214,7 +217,7 @@ class Character(BaseModel):
 
             if _items_details is None:
                 _items_details = infos.get_inventory_items()
-                gold_amount = await self.get_gold_amount()
+                gold_amount = infos.get_gold_amount()
                 if gold_amount > 0:
                     _items_details['money'] = gold_amount
 
@@ -223,17 +226,13 @@ class Character(BaseModel):
                 cooldown_ = await self.bank_deposit(item_code, item_qty)
                 await asyncio.sleep(cooldown_)
 
-    async def get_gold_amount(self) -> int:
-        infos = await get_all_infos(self.session, self.name)
-        return infos.gold
-
     async def withdraw_items_from_bank(self, _items_details: dict[str, int]):
         # Move to the bank
         await self.move_to_bank()
 
         self._logger.debug(f'collecting at bank: {_items_details} ...')
 
-        infos = await get_all_infos(self.session, self.name)
+        infos = await self.get_infos()
         nb_free_slots = infos.get_inventory_free_slots_nb()
         if sum([qty for qty in _items_details.values()]) > nb_free_slots:
             self._logger.error(f'Not enough room left in inventory')
@@ -258,20 +257,20 @@ class Character(BaseModel):
             await asyncio.sleep(cooldown_)
 
     async def is_up_to_gather(self, _material_code: str, target_qty: int):
-        infos = await get_all_infos(self.session, self.name)
+        infos = await self.get_infos()
         inventory_items = infos.get_inventory_items()
         gathered_qty = inventory_items.get(_material_code, 0)
         return not infos.is_inventory_full() and gathered_qty < target_qty
 
     async def is_up_to_fight(self, is_event: bool = False) -> bool:
-        (infos, got_enough_consumables, is_event_still_on,
+        (infos, is_event_still_on,
          is_at_spawn_place, is_task_completed) = await asyncio.gather(
             get_all_infos(self.session, self.name),
-            self.got_enough_consumables(-1),
             self.is_event_still_on(),
             self.is_at_spawn_place(),
             self.is_task_completed()
         )
+        got_enough_consumables = infos.got_enough_consumables(-1)
         is_inventory_full = infos.is_inventory_full()
         if is_event:
             up_to_fight = got_enough_consumables and is_event_still_on and not (is_inventory_full or is_at_spawn_place)
@@ -299,22 +298,22 @@ class Character(BaseModel):
             return
         await self.move_to_monster(monster.code)
 
-        infos = await get_all_infos(self.session, self.name)
+        infos = await self.get_infos()
         while not infos.is_inventory_full() and infos.get_inventory_item_quantity(material_code) < quantity_to_get:
-            infos = await get_all_infos(self.session, self.name)
+            infos = await self.get_infos()
             cooldown_ = await self.perform_fighting()
             await asyncio.sleep(cooldown_)
 
     async def got_enough_consumables(self, min_qty: int):
         # TODO min_qty can be an attribute linked to fight target (depending on difficulty)
-        character_infos = await get_all_infos(self.session, self.name)
+        character_infos = await self.get_infos()
         consumable1_qty = character_infos.consumable1_slot_quantity
         consumable2_qty = character_infos.consumable2_slot_quantity
         return consumable1_qty + consumable2_qty > min_qty
 
     async def get_skill_level(self, _skill: str = None) -> int:
         # FIXME
-        infos = await get_all_infos(self.session, self.name)
+        infos = await self.get_infos()
         if _skill == 'mob':
             _skill = ''
         elif _skill == 'food':
@@ -322,11 +321,11 @@ class Character(BaseModel):
         return infos.get_skill_level(_skill)
 
     async def get_level(self) -> int:
-        infos = await get_all_infos(self.session, self.name)
+        infos = await self.get_infos()
         return infos.level
 
     async def get_current_location(self) -> tuple[int, int]:
-        infos = await get_all_infos(self.session, self.name)
+        infos = await self.get_infos()
         return int(infos.x), int(infos.y)
 
     async def complete_task(self, session: ClientSession, name: str):
@@ -416,7 +415,7 @@ class Character(BaseModel):
         craft_recipee = _item.get_craft_recipee()
         self._logger.debug(f' recipee for {_item.code} is {craft_recipee}')
 
-        infos = await get_all_infos(self.session, self.name)
+        infos = await self.get_infos()
 
         nb_craftable_items = _item.get_max_taskable_quantity(infos.get_inventory_max_size())
 
@@ -561,7 +560,7 @@ class Character(BaseModel):
         await asyncio.sleep(cooldown_)
 
     async def get_current_equipments(self, _items: dict[str, Item]) -> dict[str, Item]:
-        infos = await get_all_infos(self.session, self.name)
+        infos = await self.get_infos()
         return {
             equipment_slot: _items[infos.get_slot_content(equipment_slot)]
             if infos.get_slot_content(equipment_slot) != "" else None
@@ -569,7 +568,7 @@ class Character(BaseModel):
         }
 
     async def go_and_equip(self, _equipment_slot: str, _equipment_code: str):
-        infos = await get_all_infos(self.session, self.name)
+        infos = await self.get_infos()
         current_equipment_code = infos.get_equipment_code(_equipment_slot)
         if current_equipment_code != _equipment_code:
             self._logger.debug(f' will change equipment for {_equipment_slot} '
@@ -587,6 +586,9 @@ class Character(BaseModel):
         Args:
             gathering_skill (str): The gathering skill
         """
+
+        infos = await self.get_infos()
+
         # Get the list of equipments from the bank for the 'weapon' slot
         bank_equipments = await self.get_bank_equipments_for_slot('weapon')
 
@@ -605,7 +607,7 @@ class Character(BaseModel):
         # Ensure equipments are valid for the character's level
         valid_equipments = [
             equipment for equipment in valid_equipments
-            if equipment.is_valid_equipment(await self.get_level())
+            if equipment.is_valid_equipment(infos.get_level())
         ]
 
         if not valid_equipments:
@@ -659,7 +661,7 @@ class Character(BaseModel):
                 material2craft_qty[material_code] = material2craft_qty.get(material_code, 0) + material_qty
 
         material2deposit_qty = {}
-        infos = await get_all_infos(self.session, self.name)
+        infos = await self.get_infos()
         for inventory_item_code, inventory_qty in infos.get_inventory_items().items():
             if inventory_item_code not in material2craft_qty:
                 material2deposit_qty[inventory_item_code] = inventory_qty
@@ -793,7 +795,7 @@ class Character(BaseModel):
                 continue
 
             # Get current consumable details for the slot
-            character_infos = await get_all_infos(self.session, self.name)
+            character_infos = await self.get_infos()
             current_code = character_infos.get_slot_content(slot)
             current_qty = character_infos.get_slot_quantity(slot)
             new_code = new_consumable.code
@@ -824,13 +826,13 @@ class Character(BaseModel):
                     await self.equip(new_code, slot, new_qty)
 
     async def get_ordered_current_consumables(self) -> list[Item]:
-        character_infos = await get_all_infos(self.session, self.name)
+        character_infos = await self.get_infos()
         currently_equipped_consumables = [character_infos.consumable1_slot, character_infos.consumable2_slot]
         self._logger.debug(f' Currently equipped consumables: {currently_equipped_consumables}')
         return [self.environment.consumables[c] if c else None for c in currently_equipped_consumables]
 
     async def equip_best_equipment(self, _equipment_slot: str, vulnerabilities: dict[str, int]):
-        infos = await get_all_infos(self.session, self.name)
+        infos = await self.get_infos()
         available_equipments = await self.get_bank_equipments_for_slot(_equipment_slot)
         self._logger.debug(f'available equipment at bank {[e.code for e in available_equipments]}')
         sorted_valid_equipments = sorted([
@@ -971,7 +973,7 @@ class Character(BaseModel):
 
         # If task is too difficult, change
         while game_task.code in EXCLUDED_MONSTERS:
-            infos = await get_all_infos(self.session, self.name)
+            infos = await self.get_infos()
             if infos.get_inventory_item_quantity("tasks_coin") == 0:
                 await self.withdraw_items_from_bank({"tasks_coin": 1})
             await self.move_to_task_master()
@@ -983,7 +985,7 @@ class Character(BaseModel):
 
         # TODO can also be a personal task (amount of collectibles) - allow for some materials to be collected by others
 
-        character_infos = await get_all_infos(self.session, self.name)
+        character_infos = await self.get_infos()
         return character_infos.task_progress == character_infos.task_total
 
     async def get_unnecessary_equipments(self) -> dict[str, int]:
@@ -1008,7 +1010,7 @@ class Character(BaseModel):
         return item_gold_value > sum(gold_value_sorted_materials[:2])
 
     async def get_game_task(self) -> Task:
-        infos = await get_all_infos(self.session, self.name)
+        infos = await self.get_infos()
         task = infos.task
         task_type = TaskType(infos.task_type)
         task_total = infos.task_total - infos.task_progress
@@ -1036,7 +1038,7 @@ class Character(BaseModel):
         return self.craftable_items[0]
 
     async def set_task(self, item: Item):
-        infos = await get_all_infos(self.session, self.name)
+        infos = await self.get_infos()
         self.task = Task(
             code=item.code,
             type=item.get_task_type(),
@@ -1049,7 +1051,7 @@ class Character(BaseModel):
         objective = await self.get_best_objective()     # FIXME get it depending on potential XP gain
         # FIXME could be checked here amongst craftable items first, then gatherable ones
 
-        infos = await get_all_infos(self.session, self.name)
+        infos = await self.get_infos()
 
         return Task(
             code=objective.code,
@@ -1116,7 +1118,7 @@ class Character(BaseModel):
         self._logger.info(f" Here is the task to be executed: "
                           f"{self.task.code} ({self.task.type.value}: {self.task.total})")
 
-        infos = await get_all_infos(self.session, self.name)
+        infos = await self.get_infos()
 
         await self.equip_for_task()
 
@@ -1215,7 +1217,7 @@ class Character(BaseModel):
                 qty_at_bank = await get_bank_item_qty(self.session, item_code)
                 if qty_at_bank > 0:
                     # If yes, withdraw them and get to workshop to recycle, before getting back to bank to deposit all
-                    infos = await get_all_infos(self.session, self.name)
+                    infos = await self.get_infos()
                     nb_free_inventory_slots = infos.get_inventory_free_slots_nb()
                     recycling_qty = min(qty_at_bank, nb_free_inventory_slots // 2)  # Need room when recycling
 
@@ -1229,7 +1231,7 @@ class Character(BaseModel):
 
             recycle_details = await self.get_unnecessary_equipments()
             for item_code, recycling_qty in recycle_details.items():
-                infos = await get_all_infos(self.session, self.name)
+                infos = await self.get_infos()
                 nb_free_inventory_slots = infos.get_inventory_free_slots_nb()
                 recycling_qty = min(recycling_qty, nb_free_inventory_slots // 2)  # Need room when recycling
 
