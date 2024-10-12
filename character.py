@@ -300,10 +300,8 @@ class Character(BaseModel):
         await self.move_to_monster(monster.code)
 
         infos = await get_all_infos(self.session, self.name)
-        is_inventory_full = infos.is_inventory_full()
-        while not is_inventory_full and await self.get_inventory_quantity(material_code) < quantity_to_get:
+        while not infos.is_inventory_full() and infos.get_inventory_item_quantity(material_code) < quantity_to_get:
             infos = await get_all_infos(self.session, self.name)
-            is_inventory_full = infos.is_inventory_full()
             cooldown_ = await self.perform_fighting()
             await asyncio.sleep(cooldown_)
 
@@ -413,11 +411,6 @@ class Character(BaseModel):
                 nearest_resource = resource_loc
         return nearest_resource['x'], nearest_resource['y']
 
-    async def get_inventory_quantity(self, _item_code: str) -> int:
-        infos = await get_all_infos(self.session, self.name)
-        inventory_items = infos.get_inventory_items()
-        return inventory_items.get(_item_code, 0)
-
     async def get_nb_craftable_items(self, _item: Item, from_inventory: bool = False) -> int:
 
         craft_recipee = _item.get_craft_recipee()
@@ -429,7 +422,7 @@ class Character(BaseModel):
 
         if from_inventory:  # Taking into account drops > update qty available in inventory
             for material_code, qty in craft_recipee.items():
-                material_inventory_qty = await self.get_inventory_quantity(material_code)
+                material_inventory_qty = infos.get_inventory_item_quantity(material_code)
                 nb_craftable_items = min(material_inventory_qty//qty, nb_craftable_items)
 
         self._logger.debug(f' nb of craftable items {"from inventory" if from_inventory else ""} '
@@ -567,10 +560,10 @@ class Character(BaseModel):
         cooldown_ = await self.move(*coords)
         await asyncio.sleep(cooldown_)
 
-    async def get_current_equipments(self) -> dict[str, Item]:
+    async def get_current_equipments(self, _items: dict[str, Item]) -> dict[str, Item]:
         infos = await get_all_infos(self.session, self.name)
         return {
-            equipment_slot: self.environment.items[infos.get_slot_content(equipment_slot)]
+            equipment_slot: _items[infos.get_slot_content(equipment_slot)]
             if infos.get_slot_content(equipment_slot) != "" else None
             for equipment_slot in EQUIPMENTS_SLOTS
         }
@@ -713,7 +706,7 @@ class Character(BaseModel):
         vulnerabilities = _monster.get_vulnerabilities()
         self._logger.debug(f' monster {_monster.code} vulnerabilities are {vulnerabilities}')
 
-        current_equipments = await self.get_current_equipments()
+        current_equipments = await self.get_current_equipments(self.environment.items)
         sorted_valid_bank_equipments = await self.get_sorted_valid_bank_equipments()
 
         selected_equipments = await select_best_equipment_set(
@@ -978,7 +971,8 @@ class Character(BaseModel):
 
         # If task is too difficult, change
         while game_task.code in EXCLUDED_MONSTERS:
-            if await self.get_inventory_quantity("tasks_coin") == 0:
+            infos = await get_all_infos(self.session, self.name)
+            if infos.get_inventory_item_quantity("tasks_coin") == 0:
                 await self.withdraw_items_from_bank({"tasks_coin": 1})
             await self.move_to_task_master()
             await self.cancel_task()
@@ -1160,7 +1154,7 @@ class Character(BaseModel):
 
         elif self.task.type == TaskType.RECYCLE:
             await self.withdraw_items_from_bank({self.task.code: self.task.total})
-            if await self.get_inventory_quantity(self.task.code) >= self.task.total:
+            if infos.get_inventory_item_quantity(self.task.code) >= self.task.total:
                 await self.move_to_workshop()
                 cooldown = await self.perform_recycling(self.task.details, self.task.total)
                 await asyncio.sleep(cooldown)
