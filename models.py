@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 from enum import Enum
 from datetime import datetime
-from constants import EQUIPMENTS_TYPES
+from constants import EQUIPMENTS_TYPES, SPAWN_COORDINATES
 
 
 class TaskType(Enum):
@@ -65,8 +65,8 @@ class CharacterInfos(BaseModel):
     res_earth: int
     res_water: int
     res_air: int
-    x: int
-    y: int
+    x: int = SPAWN_COORDINATES[0]
+    y: int = SPAWN_COORDINATES[1]
     cooldown: int
     cooldown_expiration: datetime
     weapon_slot: str
@@ -82,15 +82,28 @@ class CharacterInfos(BaseModel):
     artifact2_slot: str
     artifact3_slot: str
     consumable1_slot: str
-    consumable1_slot_quantity: int
+    consumable1_slot_quantity: int = 0
     consumable2_slot: str
-    consumable2_slot_quantity: int
+    consumable2_slot_quantity: int = 0
     task: str
-    task_type: str
-    task_progress: int
-    task_total: int
-    inventory_max_items: int
-    inventory: List[InventoryItem]
+    task_type: str = "idle"
+    task_progress: int = 0
+    task_total: int = -1
+    inventory_max_items: int = 100
+    inventory: List[InventoryItem] = Field(default_factory=list)
+
+    def get_skill_level(self, skill_name: str):
+        if not skill_name:
+            return self.level
+        return self.__dict__.get(f'{skill_name}_level')
+
+    # TODO use enum for slot name
+    def get_slot_content(self, slot_name: str) -> str:
+        return self.__dict__.get(f'{slot_name}_slot')
+
+    # TODO use enum for slot name
+    def get_slot_quantity(self, slot_name: str) -> int:
+        return self.__dict__.get(f'{slot_name}_slot_quantity', 0)
 
 
 class Craft(BaseModel):
@@ -153,10 +166,8 @@ class Monster(BaseModel):
     def is_event(self) -> bool:
         return self.code in ["demon", "bandit_lizard", "cultist_emperor", "rosenblood"]
 
-    # TODO use CharacterInfos
-    def does_provide_xp(self, character_infos: dict, max_level: int) -> bool:
-        character_level = character_infos["level"]
-        return self.level >= (character_level - 10) and character_level < max_level
+    def does_provide_xp(self, character_infos: CharacterInfos, max_level: int) -> bool:
+        return self.level >= (character_infos.level - 10) and character_infos.level < max_level
 
 
 class Resource(BaseModel):
@@ -284,13 +295,12 @@ class Item(BaseModel):
             return self.level
         return self.level
 
-    def does_provide_xp(self, character_infos: dict, max_level: int) -> bool:
+    def does_provide_xp(self, character_infos: CharacterInfos, max_level: int) -> bool:
 
         item_skill_name = self.get_skill_name()
         item_skill_level = self.get_skill_level()
 
-        skill_level_key = f'{item_skill_name}_level' if item_skill_name else 'level'
-        skill_level = character_infos.get(skill_level_key)
+        skill_level = character_infos.get_skill_level(item_skill_name)
 
         return skill_level is not None and skill_level - 10 <= item_skill_level and skill_level < max_level
 
@@ -366,17 +376,11 @@ class Task(BaseModel):
         return self.type == TaskType.RESOURCES
 
     # TODO get max_fight_level from character_infos?
-    def is_feasible(self, character_infos: dict, max_fight_level: int) -> bool:
+    def is_feasible(self, character_infos: CharacterInfos, max_fight_level: int) -> bool:
         if self.is_fight_type() and self.details.level <= max_fight_level:
             return True
-        if self.is_craft_type():
-            skill_level_key = f'{self.details.craft.skill}_level'
-            skill_level = character_infos.get(skill_level_key)
-            if skill_level is not None and self.details.level <= skill_level:
-                return True
-        if self.is_gather_type():
-            skill_level_key = f'{self.details.skill}_level'
-            skill_level = character_infos.get(skill_level_key)
+        if self.is_craft_type() or self.is_gather_type():
+            skill_level = character_infos.get_skill_level(self.details.get_skill_name())
             if skill_level is not None and self.details.level <= skill_level:
                 return True
         return False
@@ -455,11 +459,11 @@ class Environment(BaseModel):
 
         }
 
-    def get_craftable_items(self, character_infos: dict) -> list[Item]:
+    def get_craftable_items(self, character_infos: CharacterInfos) -> list[Item]:
         return [
             item
             for item in self.crafted_items
-            if item.get_skill_level() <= character_infos[f'{item.get_skill_name()}_level']
+            if item.get_skill_level() <= character_infos.get_skill_level(item.get_skill_name())
         ]
 
     def get_item_dropping_monsters(self, item_code: str) -> list[tuple[Monster, int]]:

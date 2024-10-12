@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 from aiohttp import ClientSession
-from models import Environment, Task, Item, Monster, TaskType
+from models import Environment, Task, Item, Monster, TaskType, CharacterInfos
 from constants import (STOCK_QTY_OBJECTIVE, EXCLUDED_MONSTERS, SERVER, SPAWN_COORDINATES, BANK_COORDINATES,
                        EQUIPMENTS_SLOTS, SLOT_TYPE_MAPPING)
 from utils import select_best_equipment, select_best_equipment_set
@@ -43,7 +43,7 @@ class Character(BaseModel):
         and fightable monsters. It should be called explicitly after character creation.
         """
         # TODO add also check on inventory and on task status?
-        infos = await self.get_infos()
+        infos = await self.get_all_infos()
         await asyncio.gather(
             self.set_gatherable_items(infos),
             self.set_craftable_items(infos),
@@ -51,7 +51,7 @@ class Character(BaseModel):
         )
         await self.set_objectives()
 
-    async def set_gatherable_items(self, infos: dict):
+    async def set_gatherable_items(self, character_infos: CharacterInfos):
         """
         Fetch and set gatherable resources based on the character's collect skill and level
         """
@@ -59,19 +59,14 @@ class Character(BaseModel):
             item
             for item in self.environment.items.values()
             if (item.is_gatherable()
-                and item.level <= infos[f'{item.subtype}_level']
+                and item.level <= character_infos.get_skill_level(item.subtype)
                 and self.environment.get_item_dropping_max_rate(item.code) <= 100)
         ]
-
-        # for item_code, item in self.environment.items.items():
-        #     if item.is_gatherable() and item.level <= infos[f'{item.subtype}_level']:
-        #         if self.environment.get_item_dropping_max_rate(item_code) <= 100:
-        #             gatherable_items.append(item)
 
         self.gatherable_items = gatherable_items
         self._logger.info(f"Gatherable items for {self.name}: {[r.code for r in self.gatherable_items]}")
 
-    async def set_craftable_items(self, character_infos: dict):
+    async def set_craftable_items(self, character_infos: CharacterInfos):
         """
         Fetch and set craftable items based on the character's craft skill and level
         """
@@ -135,7 +130,7 @@ class Character(BaseModel):
         xp_item_codes = [
             item.code
             for item in self.craftable_items + self.gatherable_items
-            if item.does_provide_xp(await self.get_infos(), self.environment.status.max_level)
+            if item.does_provide_xp(await self.get_all_infos(), self.environment.status.max_level)
         ]
 
         home_made_item_codes = [
@@ -192,7 +187,7 @@ class Character(BaseModel):
             monster
             for monster in self.fightable_monsters
             if (await self.can_be_vanquished(monster)
-                and monster.does_provide_xp(await self.get_infos(), self.environment.status.max_level))
+                and monster.does_provide_xp(await self.get_all_infos(), self.environment.status.max_level))
         ][::-1]
 
         self.objectives = self.craft_objectives + self.gather_objectives
@@ -201,28 +196,21 @@ class Character(BaseModel):
     async def can_be_vanquished(self, monster: Monster) -> bool:
         return monster.code in [m.code for m in self.fightable_monsters]
 
-    async def get_infos(self) -> dict:
-        url = f"{SERVER}/characters/{self.name}"
+    async def get_character_infos(self, name: str) -> dict:
+        url = f"{SERVER}/characters/{name}"
         data = await make_request(session=self.session, method='GET', url=url)
-        if data:
-            self._logger.debug("Fetched character info successfully.")
-        else:
-            self._logger.error("Failed to fetch character info.")
         return data["data"] if data else {}
 
+    async def get_all_infos(self) -> CharacterInfos:
+        infos = await self.get_character_infos(self.name)
+        return CharacterInfos(**infos)
+
     async def get_inventory_qty(self) -> dict[str, int]:
-        url = f"{SERVER}/characters/{self.name}"
-        data = await make_request(session=self.session, method='GET', url=url)
-        if data:
-            self._logger.debug("Fetched character inventory successfully.")
-        else:
-            self._logger.error("Failed to fetch character inventory.")
-        character_infos = data["data"] if data else {}
-        inventory_slots = [slot for slot in character_infos["inventory"]]
+        character_infos = await self.get_all_infos()
         return {
-            slot["code"]: slot["quantity"]
-            for slot in inventory_slots
-            if slot["code"] != ""
+            slot.code: slot.quantity
+            for slot in character_infos.inventory
+            if slot.code != ""
         }
 
     async def move_to_bank(self):
@@ -251,8 +239,8 @@ class Character(BaseModel):
                 await asyncio.sleep(cooldown_)
 
     async def get_gold_amount(self) -> int:
-        infos = await self.get_infos()
-        return infos['gold']
+        infos = await self.get_all_infos()
+        return infos.gold
 
     async def withdraw_items_from_bank(self, _items_details: dict[str, int]):
         # Move to the bank
@@ -329,54 +317,53 @@ class Character(BaseModel):
 
     async def got_enough_consumables(self, min_qty: int):
         # TODO min_qty can be an attribute linked to fight target (depending on difficulty)
-        character_infos = await self.get_infos()
-        consumable1_qty = character_infos.get('consumable1_slot_quantity', 0)
-        consumable2_qty = character_infos.get('consumable2_slot_quantity', 0)
+        character_infos = await self.get_all_infos()
+        consumable1_qty = character_infos.consumable1_slot_quantity
+        consumable2_qty = character_infos.consumable2_slot_quantity
         return consumable1_qty + consumable2_qty > min_qty
 
     async def get_skill_level(self, _skill: str = None) -> int:
         # FIXME
-        infos = await self.get_infos()
+        infos = await self.get_all_infos()
         if _skill == 'mob':
-            return await self.get_level()
+            _skill = ''
         elif _skill == 'food':
             _skill = "cooking"
-        return infos[f'{_skill}_level']
+        return infos.get_skill_level(_skill)
 
     async def get_level(self) -> int:
-        infos = await self.get_infos()
-        return infos['level']
+        infos = await self.get_all_infos()
+        return infos.level
 
     async def get_inventory_occupied_slots_nb(self) -> int:
-        infos = await self.get_infos()
+        infos = await self.get_all_infos()
         return sum([
-            i_infos['quantity']
-            for i_infos in infos.get('inventory', [])
-            if i_infos['code'] != ""
+            i_infos.quantity
+            for i_infos in infos.inventory
+            if i_infos.code != ""
         ])
 
     async def get_inventory_free_slots_nb(self) -> int:
         return await self.get_inventory_max_size() - await self.get_inventory_occupied_slots_nb()
 
     async def get_inventory_max_size(self) -> int:
-        infos = await self.get_infos()
-        return infos.get('inventory_max_items', 100)
+        infos = await self.get_all_infos()
+        return infos.inventory_max_items
 
     async def get_inventory_items(self) -> dict:
-        infos = await self.get_infos()
+        infos = await self.get_all_infos()
         return {
-            i_infos['code']: i_infos['quantity']
-            for i_infos in infos.get('inventory', {})
-            if i_infos['code'] != ""
+            i_infos.code: i_infos.quantity
+            for i_infos in infos.inventory
+            if i_infos.code != ""
         }
 
     async def is_inventory_full(self) -> bool:
         return await self.get_inventory_free_slots_nb() == 0
 
     async def get_current_location(self) -> tuple[int, int]:
-        infos = await self.get_infos()
-        default_x, default_y = SPAWN_COORDINATES
-        return int(infos.get('x', default_x)), int(infos.get('y', default_y))
+        infos = await self.get_all_infos()
+        return int(infos.x), int(infos.y)
 
     async def complete_task(self):
         url = f"{SERVER}/my/{self.name}/action/task/complete"
@@ -611,20 +598,16 @@ class Character(BaseModel):
         cooldown_ = await self.move(*coords)
         await asyncio.sleep(cooldown_)
 
+    # TODO use enum for _equipment_slot
     async def get_equipment_code(self, _equipment_slot: str) -> str:
-        infos = await self.get_infos()
-        key = f'{_equipment_slot}_slot'
-        if key in infos:
-            return infos[key]
-        else:
-            self._logger.warning(f"Equipment slot '{key}' not found in character info.")
-            return ""
+        infos = await self.get_all_infos()
+        return infos.get_slot_content(_equipment_slot)
 
     async def get_current_equipments(self) -> dict[str, Item]:
-        infos = await self.get_infos()
+        infos = await self.get_all_infos()
         return {
-            equipment_slot: self.environment.items[infos[f'{equipment_slot}_slot']]
-            if infos[f'{equipment_slot}_slot'] != "" else None
+            equipment_slot: self.environment.items[infos.get_slot_content(equipment_slot)]
+            if infos.get_slot_content(equipment_slot) != "" else None
             for equipment_slot in EQUIPMENTS_SLOTS
         }
 
@@ -851,9 +834,9 @@ class Character(BaseModel):
                 continue
 
             # Get current consumable details for the slot
-            character_infos = await self.get_infos()
-            current_code = character_infos.get(f"{slot}_slot", "")
-            current_qty = character_infos.get(f"{slot}_slot_quantity", 0)
+            character_infos = await self.get_all_infos()
+            current_code = character_infos.get_slot_content(slot)
+            current_qty = character_infos.get_slot_quantity(slot)
             new_code = new_consumable.code
 
             # Check if the new consumable is the same as the current one
@@ -882,8 +865,8 @@ class Character(BaseModel):
                     await self.equip(new_code, slot, new_qty)
 
     async def get_ordered_current_consumables(self) -> list[Item]:
-        character_infos = await self.get_infos()
-        currently_equipped_consumables = [character_infos['consumable1_slot'], character_infos['consumable2_slot']]
+        character_infos = await self.get_all_infos()
+        currently_equipped_consumables = [character_infos.consumable1_slot, character_infos.consumable2_slot]
         self._logger.debug(f' Currently equipped consumables: {currently_equipped_consumables}')
         return [self.environment.consumables[c] if c else None for c in currently_equipped_consumables]
 
@@ -1039,8 +1022,8 @@ class Character(BaseModel):
 
         # TODO can also be a personal task (amount of collectibles) - allow for some materials to be collected by others
 
-        character_infos = await self.get_infos()
-        return character_infos.get("task_progress", "A") == character_infos.get("task_total", "B")
+        character_infos = await self.get_all_infos()
+        return character_infos.task_progress == character_infos.task_total
 
     async def get_unnecessary_equipments(self) -> dict[str, int]:
         recycle_details = {}
@@ -1064,10 +1047,10 @@ class Character(BaseModel):
         return item_gold_value > sum(gold_value_sorted_materials[:2])
 
     async def get_game_task(self) -> Task:
-        infos = await self.get_infos()
-        task = infos.get("task", "")
-        task_type = TaskType(infos.get("task_type", "idle"))
-        task_total = infos.get("task_total", 0) - infos.get("task_progress", 0)
+        infos = await self.get_all_infos()
+        task = infos.task
+        task_type = TaskType(infos.task_type)
+        task_total = infos.task_total - infos.task_progress
         if task_type == TaskType.MONSTERS:
             task_details = self.environment.monsters[task]
         elif task_type == TaskType.ITEMS:

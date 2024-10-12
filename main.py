@@ -25,7 +25,7 @@ async def run_bot(character_object: Character):
         if event_task.type != TaskType.IDLE:
             character_object.task = event_task
         # No need to do game tasks if already a lot of task coins
-        elif ((game_task.is_feasible(await character_object.get_infos(), character_object.max_fight_level)
+        elif ((game_task.is_feasible(await character_object.get_all_infos(), character_object.max_fight_level)
               and (await get_bank_item_qty(character_object.session, "tasks_coin") < 100))
               or len(character_object.objectives) == 0):
             character_object.task = game_task
