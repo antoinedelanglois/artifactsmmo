@@ -247,10 +247,14 @@ class Character(BaseModel):
         await self.move_to_bank()
 
         self._logger.debug(f'collecting at bank: {_items_details} ...')
+
+        infos = await get_all_infos(self.session, self.name)
+        nb_free_slots = infos.get_inventory_free_slots_nb()
+        if sum([qty for qty in _items_details.values()]) > nb_free_slots:
+            self._logger.error(f'Not enough room left in inventory')
+
         for item_code, item_qty in _items_details.items():
-            # FIXME check to be done beforehand?
-            nb_free_slots = await self.get_inventory_free_slots_nb()
-            cooldown_ = await self.bank_withdraw(item_code, min(item_qty, nb_free_slots))
+            cooldown_ = await self.bank_withdraw(item_code, item_qty)
             await asyncio.sleep(cooldown_)
 
     async def gather_material(self, material_code: str, quantity: int):
