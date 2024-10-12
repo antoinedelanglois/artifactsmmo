@@ -159,6 +159,75 @@ async def get_character_complete_task(session: ClientSession, name: str) -> dict
     return data["data"] if data else {}
 
 
+async def get_character_withdraw_from_bank(session: ClientSession, name: str, item_code: str, quantity: int) -> dict:
+    url = f"{SERVER}/my/{name}/action/bank/withdraw"
+    payload = {"code": item_code, "quantity": quantity}
+    data = await make_request(session=session, method='POST', url=url, payload=payload)
+    return data["data"] if data else {}
+
+
+async def get_character_deposit_at_bank(session: ClientSession, name: str, item_code: str, quantity: int) -> dict:
+    url = f"{SERVER}/my/{name}/action/bank/deposit"
+    payload = {"code": item_code, "quantity": quantity}
+    data = await make_request(session=session, method='POST', url=url, payload=payload)
+    return data["data"] if data else {}
+
+
+async def get_character_deposit_gold_at_bank(session: ClientSession, name: str, quantity: int) -> dict:
+    url = f"{SERVER}/my/{name}/action/bank/deposit/gold"
+    payload = {"quantity": quantity}
+    data = await make_request(session=session, method='POST', url=url, payload=payload)
+    return data["data"] if data else {}
+
+
+async def get_character_perform_crafting(session: ClientSession, name: str, item_code: str, quantity: int) -> dict:
+    url = f"{SERVER}/my/{name}/action/crafting"
+    payload = {"code": item_code, "quantity": quantity}
+    data = await make_request(session=session, method='POST', url=url, payload=payload)
+    return data["data"] if data else {}
+
+
+async def get_character_perform_recycling(session: ClientSession, name: str, item_code: str, quantity: int) -> dict:
+    url = f"{SERVER}/my/{name}/action/recycling"
+    payload = {"code": item_code, "quantity": quantity}
+    data = await make_request(session=session, method='POST', url=url, payload=payload)
+    return data["data"] if data else {}
+
+
+async def get_character_perform_fighting(session: ClientSession, name: str) -> dict:
+    url = f"{SERVER}/my/{name}/action/fight"
+    data = await make_request(session=session, method='POST', url=url)
+    return data["data"] if data else {}
+
+
+async def get_character_perform_gathering(session: ClientSession, name: str) -> dict:
+    url = f"{SERVER}/my/{name}/action/gathering"
+    data = await make_request(session=session, method='POST', url=url)
+    return data["data"] if data else {}
+
+
+async def get_character_perform_equip(session: ClientSession, name: str, item_code: str,
+                                      slot_code: str, quantity: int) -> dict:
+    url = f"{SERVER}/my/{name}/action/equip"
+    payload = {
+        "code": item_code,
+        "slot": slot_code,
+        "quantity": quantity
+    }
+    data = await make_request(session=session, method='POST', url=url, payload=payload)
+    return data["data"] if data else {}
+
+
+async def get_character_perform_unequip(session: ClientSession, name: str, slot_code: str, quantity: int) -> dict:
+    url = f"{SERVER}/my/{name}/action/unequip"
+    payload = {
+        "slot": slot_code,
+        "quantity": quantity
+    }
+    data = await make_request(session=session, method='POST', url=url, payload=payload)
+    return data["data"] if data else {}
+
+
 async def get_status(session: ClientSession) -> dict:
     url = f"{SERVER}/"
     data = await make_request(session=session, method='GET', url=url)

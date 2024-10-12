@@ -1,13 +1,16 @@
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 from aiohttp import ClientSession
 from models import Environment, Task, Item, Monster, TaskType, CharacterInfos
-from constants import (STOCK_QTY_OBJECTIVE, EXCLUDED_MONSTERS, SERVER, SPAWN_COORDINATES, BANK_COORDINATES,
+from constants import (STOCK_QTY_OBJECTIVE, EXCLUDED_MONSTERS, SPAWN_COORDINATES, BANK_COORDINATES,
                        EQUIPMENTS_SLOTS, SLOT_TYPE_MAPPING)
 from utils import select_best_equipment, select_best_equipment_set
-from api import (get_bank_item_qty, make_request, get_place_name, get_all_maps, get_all_events,
+from api import (get_bank_item_qty, get_place_name, get_all_maps, get_all_events,
                  get_all_items_quantities, needs_stock, get_all_map_item_qty, get_bank_items, get_all_infos,
                  get_character_move, get_character_exchange_tasks_coins, get_character_accept_new_task,
-                 get_character_cancel_task, get_character_complete_task)
+                 get_character_cancel_task, get_character_complete_task, get_character_withdraw_from_bank,
+                 get_character_deposit_at_bank, get_character_deposit_gold_at_bank, get_character_perform_crafting,
+                 get_character_perform_recycling, get_character_perform_fighting, get_character_perform_gathering,
+                 get_character_perform_equip, get_character_perform_unequip)
 import asyncio
 import logging
 
@@ -307,10 +310,10 @@ class Character(BaseModel):
             cooldown_ = await self.perform_fighting()
             await asyncio.sleep(cooldown_)
 
-    async def complete_task(self, session: ClientSession, name: str):
+    async def complete_task(self):
         data = await get_character_complete_task(self.session, self.name)
         if data:
-            _cooldown = data["data"]["cooldown"]["total_seconds"]
+            _cooldown = data["cooldown"]["total_seconds"]
             await asyncio.sleep(_cooldown)
         else:
             self._logger.error(f'failed to complete task.')
@@ -318,7 +321,7 @@ class Character(BaseModel):
     async def cancel_task(self):
         data = await get_character_cancel_task(self.session, self.name)
         if data:
-            _cooldown = data["data"]["cooldown"]["total_seconds"]
+            _cooldown = data["cooldown"]["total_seconds"]
             await asyncio.sleep(_cooldown)
         else:
             self._logger.error(f'failed to cancel task.')
@@ -326,7 +329,7 @@ class Character(BaseModel):
     async def accept_new_task(self):
         data = await get_character_accept_new_task(self.session, self.name)
         if data:
-            _cooldown = data["data"]["cooldown"]["total_seconds"]
+            _cooldown = data["cooldown"]["total_seconds"]
             await asyncio.sleep(_cooldown)
         else:
             self._logger.error(f'failed to get new task.')
@@ -334,10 +337,10 @@ class Character(BaseModel):
     async def exchange_tasks_coins(self):
         data = await get_character_exchange_tasks_coins(self.session, self.name)
         if data:
-            _cooldown = data["data"]["cooldown"]["total_seconds"]
+            _cooldown = data["cooldown"]["total_seconds"]
             await asyncio.sleep(_cooldown)
         else:
-            self._logger.error(f'failed to get new task.')
+            self._logger.error(f'failed to exchange tasks coins.')
 
     async def move(self, x, y) -> int:
         infos = await self.get_infos()
@@ -348,7 +351,7 @@ class Character(BaseModel):
 
         data = await get_character_move(self.session, self.name, x, y)
         if data:
-            _cooldown = data["data"]["cooldown"]["total_seconds"]
+            _cooldown = data["cooldown"]["total_seconds"]
             self._logger.debug(f'moved to ({await get_place_name(self.session, x, y)}). Cooldown: {_cooldown} seconds')
             return _cooldown
         else:
@@ -406,20 +409,12 @@ class Character(BaseModel):
         return nb_craftable_items
 
     async def bank_deposit(self, item_code: str, quantity: int) -> int:
-        url = f"{SERVER}/my/{self.name}/action/bank/deposit"
         if item_code == 'money':
-            url += '/gold'
-            payload = {
-                "quantity": quantity
-            }
+            data = await get_character_deposit_gold_at_bank(self.session, self.name, quantity)
         else:
-            payload = {
-                "code": item_code,
-                "quantity": quantity
-            }
-        data = await make_request(session=self.session, method='POST', url=url, payload=payload)
+            data = await get_character_deposit_at_bank(self.session, self.name, item_code, quantity)
         if data:
-            _cooldown = data["data"]["cooldown"]["total_seconds"]
+            _cooldown = data["cooldown"]["total_seconds"]
             self._logger.debug(f'{quantity} {item_code} deposited. Cooldown: {_cooldown} seconds')
             return _cooldown
         else:
@@ -427,75 +422,58 @@ class Character(BaseModel):
             return 0
 
     async def bank_withdraw(self, item_code: str, quantity: int) -> int:
-        url = f"{SERVER}/my/{self.name}/action/bank/withdraw"
-        payload = {
-            "code": item_code,
-            "quantity": quantity
-        }
-        data = await make_request(session=self.session, method='POST', url=url, payload=payload)
+        data = await get_character_withdraw_from_bank(self.session, self.name, item_code, quantity)
         if data:
-            _cooldown = data["data"]["cooldown"]["total_seconds"]
+            _cooldown = data["cooldown"]["total_seconds"]
             self._logger.debug(f'{quantity} {item_code} withdrawn. Cooldown: {_cooldown} seconds')
             return _cooldown
         else:
             self._logger.error(f'Failed to withdraw {quantity} {item_code}')
             return 0
 
-    async def perform_crafting(self, item_code: str, qte: int) -> int:
-        url = f"{SERVER}/my/{self.name}/action/crafting"
-        payload = {
-            "code": item_code,
-            "quantity": qte
-        }
-        data = await make_request(session=self.session, method='POST', url=url, payload=payload)
+    async def perform_crafting(self, item_code: str, quantity: int) -> int:
+        data = await get_character_perform_crafting(self.session, self.name, item_code, quantity)
         if data:
-            _cooldown = data["data"]["cooldown"]["total_seconds"]
-            gained_xp = data["data"]["details"]["xp"]
-            self._logger.info(f'{qte} {item_code} crafted. XP gained: {gained_xp}. Cooldown: {_cooldown} seconds')
+            _cooldown = data["cooldown"]["total_seconds"]
+            gained_xp = data["details"]["xp"]
+            self._logger.info(f'{quantity} {item_code} crafted. XP gained: {gained_xp}. Cooldown: {_cooldown} seconds')
             return _cooldown
         else:
-            self._logger.error(f'Failed to craft {qte} {item_code}')
+            self._logger.error(f'Failed to craft {quantity} {item_code}')
             return 0
 
     async def perform_fighting(self) -> int:
-        url = f"{SERVER}/my/{self.name}/action/fight"
-        data = await make_request(session=self.session, method='POST', url=url)
+        data = await get_character_perform_fighting(self.session, self.name)
         if data:
-            _cooldown = data["data"]["cooldown"]["total_seconds"]
+            _cooldown = data["cooldown"]["total_seconds"]
             return _cooldown
         else:
             self._logger.error(f'failed to perform fighting action.')
             return 0
 
     async def perform_gathering(self) -> int:
-        url = f"{SERVER}/my/{self.name}/action/gathering"
-        data = await make_request(session=self.session, method='POST', url=url)
+        data = await get_character_perform_gathering(self.session, self.name)
         if data:
-            _cooldown = data["data"]["cooldown"]["total_seconds"]
+            _cooldown = data["cooldown"]["total_seconds"]
             return _cooldown
         else:
             self._logger.error(f'failed to gather resources.')
             return 0
 
-    async def perform_recycling(self, _item: Item, qte: int) -> int:
-        url = f"{SERVER}/my/{self.name}/action/recycling"
-        payload = {
-            "code": _item.code,
-            "quantity": qte
-        }
+    async def perform_recycling(self, _item: Item, quantity: int) -> int:
 
         # SECURITY CHECK ON RARE ITEMS
         if _item.has_protected_ingredients():
             self._logger.warning(f' Item {_item.code} is rare so better not to recycle it.')
             return 0
 
-        data = await make_request(session=self.session, method='POST', url=url, payload=payload)
+        data = await get_character_perform_recycling(self.session, self.name, _item.code, quantity)
         if data:
-            _cooldown = data["data"]["cooldown"]["total_seconds"]
-            self._logger.info(f'{qte} {_item.code} recycled. Cooldown: {_cooldown} seconds')
+            _cooldown = data["cooldown"]["total_seconds"]
+            self._logger.info(f'{quantity} {_item.code} recycled. Cooldown: {_cooldown} seconds')
             return _cooldown
         else:
-            self._logger.error(f'failed to recycle {qte} {_item.code}.')
+            self._logger.error(f'failed to recycle {quantity} {_item.code}.')
             return 0
 
     async def is_gatherable(self, resource_code) -> bool:
@@ -702,7 +680,7 @@ class Character(BaseModel):
         await self.equip_best_consumables()
 
     async def get_eligible_bank_consumables(self) -> list[Item]:
-        infos = await self.infos()
+        infos = await self.get_infos()
         return [
             consumable
             for consumable in self.environment.consumables.values()
@@ -833,44 +811,25 @@ class Character(BaseModel):
                            f'for slot {_equipment_slot} instead of {current_equipment_infos.get("code", "")}')
         await self.go_and_equip(_equipment_slot, new_equipment_details.get('code', ""))
 
-    async def perform_unequip(self, slot_code: str, qte: int) -> int:
-        url = f"{SERVER}/my/{self.name}/action/unequip"
-        payload = {
-            "slot": slot_code,
-            "quantity": qte
-        }
-        data = await make_request(session=self.session, method='POST', url=url, payload=payload)
+    async def unequip(self, slot_code: str, quantity: int = 1):
+        data = await get_character_perform_unequip(self.session, self.name, slot_code, quantity)
         if data:
-            _cooldown = data["data"]["cooldown"]["total_seconds"]
-            self._logger.debug(f'{qte} {slot_code} unequipped. Cooldown: {_cooldown} seconds')
-            return _cooldown
+            _cooldown = data["cooldown"]["total_seconds"]
+            self._logger.debug(f'{quantity} {slot_code} unequipped. Cooldown: {_cooldown} seconds')
+            return asyncio.sleep(_cooldown)
         else:
-            self._logger.error(f'Failed to unequip {qte} {slot_code}')
-            return 0
+            self._logger.error(f'Failed to unequip {quantity} {slot_code}')
+            return
 
-    async def perform_equip(self, item_code: str, slot_code: str, qte: int) -> int:
-        url = f"{SERVER}/my/{self.name}/action/equip"
-        payload = {
-            "code": item_code,
-            "slot": slot_code,
-            "quantity": qte
-        }
-        data = await make_request(session=self.session, method='POST', url=url, payload=payload)
+    async def equip(self, item_code: str, slot_code: str, quantity: int = 1):
+        data = await get_character_perform_equip(self.session, self.name, item_code, slot_code, quantity)
         if data:
-            _cooldown = data["data"]["cooldown"]["total_seconds"]
-            self._logger.debug(f'{qte} {item_code} equipped at slot {slot_code}. Cooldown: {_cooldown} seconds')
-            return _cooldown
+            _cooldown = data["cooldown"]["total_seconds"]
+            self._logger.debug(f'{quantity} {item_code} equipped at slot {slot_code}. Cooldown: {_cooldown} seconds')
+            await asyncio.sleep(_cooldown)
         else:
-            self._logger.error(f'Failed to equip {qte} {item_code} at slot {slot_code}')
-            return 0
-
-    async def unequip(self, slot_code: str, qte: int = 1):
-        cooldown_ = await self.perform_unequip(slot_code, qte)
-        await asyncio.sleep(cooldown_)
-
-    async def equip(self, item_code: str, slot_code: str, qte: int = 1):
-        cooldown_ = await self.perform_equip(item_code, slot_code, qte)
-        await asyncio.sleep(cooldown_)
+            self._logger.error(f'Failed to equip {quantity} {item_code} at slot {slot_code}')
+            return
 
     async def get_bank_equipments_for_slot(self, equipment_slot: str) -> list[Item]:
         """
@@ -944,7 +903,7 @@ class Character(BaseModel):
             await self.move_to_task_master()
             # if task, get reward
             if game_task.code != "":
-                await self.complete_task(session, self.name)
+                await self.complete_task()
             # ask for new task
             await self.accept_new_task()
             game_task = await self.get_game_task()
@@ -1039,6 +998,9 @@ class Character(BaseModel):
         )
 
     async def prepare_for_task(self) -> dict[str, dict[str, int]]:
+
+        # infos = await self.get_infos()
+
         gather_details, collect_details, fight_details = {}, {}, {}
 
         craft_recipee = self.task.details.get_craft_recipee()
