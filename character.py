@@ -304,13 +304,6 @@ class Character(BaseModel):
             cooldown_ = await self.perform_fighting()
             await asyncio.sleep(cooldown_)
 
-    async def got_enough_consumables(self, min_qty: int):
-        # TODO min_qty can be an attribute linked to fight target (depending on difficulty)
-        character_infos = await self.get_infos()
-        consumable1_qty = character_infos.consumable1_slot_quantity
-        consumable2_qty = character_infos.consumable2_slot_quantity
-        return consumable1_qty + consumable2_qty > min_qty
-
     async def get_skill_level(self, _skill: str = None) -> int:
         # FIXME
         infos = await self.get_infos()

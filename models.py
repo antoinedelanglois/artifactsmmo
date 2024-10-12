@@ -122,29 +122,33 @@ class CharacterInfos(BaseModel):
     def get_inventory_occupied_slots_nb(self) -> int:
         return sum([
             i_infos.quantity
-            for i_infos in self.infos.inventory
+            for i_infos in self.inventory
             if i_infos.code != ""
         ])
 
     def get_inventory_free_slots_nb(self) -> int:
-        return self.get_inventory_max_size() - self.infos.get_inventory_occupied_slots_nb()
+        return self.get_inventory_max_size() - self.get_inventory_occupied_slots_nb()
 
     def is_inventory_full(self) -> bool:
         return self.get_inventory_free_slots_nb() == 0
 
     def get_inventory_max_size(self) -> int:
-        return self.infos.inventory_max_items
+        return self.inventory_max_items
 
     def get_inventory_items(self) -> dict:
         return {
             i_infos.code: i_infos.quantity
-            for i_infos in self.infos.inventory
+            for i_infos in self.inventory
             if i_infos.code != ""
         }
 
     def get_skill_level(self, skill_name: str):
-        if not skill_name:
+        # FIXME
+        if skill_name == 'mob':
             return self.level
+        elif skill_name == 'food':
+            skill_name = "cooking"
+
         return self.__dict__.get(f'{skill_name}_level')
 
     # TODO use enum for slot name
