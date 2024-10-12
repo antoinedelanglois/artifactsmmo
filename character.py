@@ -210,8 +210,7 @@ class Character(BaseModel):
             content_type='bank',
             content_code='bank'
         )
-        cooldown_ = await self.move(*bank_coords)
-        await asyncio.sleep(cooldown_)
+        await self.move(*bank_coords)
 
     async def deposit_items_at_bank(self, _items_details: dict[str, int] = None):
         infos = await self.get_infos()
@@ -228,8 +227,7 @@ class Character(BaseModel):
 
             self._logger.debug(f'depositing at bank: {_items_details} ...')
             for item_code, item_qty in _items_details.items():
-                cooldown_ = await self.bank_deposit(item_code, item_qty)
-                await asyncio.sleep(cooldown_)
+                await self.bank_deposit(item_code, item_qty)
 
     async def withdraw_items_from_bank(self, _items_details: dict[str, int]):
         # Move to the bank
@@ -243,8 +241,7 @@ class Character(BaseModel):
             self._logger.error(f'Not enough room left in inventory')
 
         for item_code, item_qty in _items_details.items():
-            cooldown_ = await self.bank_withdraw(item_code, item_qty)
-            await asyncio.sleep(cooldown_)
+            await self.bank_withdraw(item_code, item_qty)
 
     async def gather_material(self, material_code: str, quantity: int):
 
@@ -253,13 +250,11 @@ class Character(BaseModel):
             return
         location_coords = await self.get_nearest_coords('resource', resource_location.code)
 
-        cooldown_ = await self.move(*location_coords)
-        await asyncio.sleep(cooldown_)
+        await self.move(*location_coords)
 
         self._logger.info(f'gathering {quantity} {material_code} ...')
         while await self.is_up_to_gather(material_code, quantity):
-            cooldown_ = await self.perform_gathering()
-            await asyncio.sleep(cooldown_)
+            await self.perform_gathering()
 
     async def is_up_to_gather(self, _material_code: str, target_qty: int):
         infos = await self.get_infos()
@@ -307,8 +302,7 @@ class Character(BaseModel):
         infos = await self.get_infos()
         while not infos.is_inventory_full() and infos.get_inventory_item_quantity(material_code) < quantity_to_get:
             infos = await self.get_infos()
-            cooldown_ = await self.perform_fighting()
-            await asyncio.sleep(cooldown_)
+            await self.perform_fighting()
 
     async def complete_task(self):
         data = await get_character_complete_task(self.session, self.name)
@@ -342,21 +336,21 @@ class Character(BaseModel):
         else:
             self._logger.error(f'failed to exchange tasks coins.')
 
-    async def move(self, x, y) -> int:
+    async def move(self, x, y):
         infos = await self.get_infos()
         current_location = infos.get_current_location()
         if current_location == (x, y):
             self._logger.debug(f'is already at the location ({x}, {y})')
-            return 0
+            return
 
         data = await get_character_move(self.session, self.name, x, y)
         if data:
             _cooldown = data["cooldown"]["total_seconds"]
             self._logger.debug(f'moved to ({await get_place_name(self.session, x, y)}). Cooldown: {_cooldown} seconds')
-            return _cooldown
+            await asyncio.sleep(_cooldown)
         else:
             self._logger.error(f'failed to move to ({x}, {y})')
-            return 0
+            return
 
     async def get_nearest_coords(self, content_type: str, content_code: str) -> tuple[int, int]:
 
@@ -408,7 +402,7 @@ class Character(BaseModel):
 
         return nb_craftable_items
 
-    async def bank_deposit(self, item_code: str, quantity: int) -> int:
+    async def bank_deposit(self, item_code: str, quantity: int):
         if item_code == 'money':
             data = await get_character_deposit_gold_at_bank(self.session, self.name, quantity)
         else:
@@ -416,65 +410,65 @@ class Character(BaseModel):
         if data:
             _cooldown = data["cooldown"]["total_seconds"]
             self._logger.debug(f'{quantity} {item_code} deposited. Cooldown: {_cooldown} seconds')
-            return _cooldown
+            await asyncio.sleep(_cooldown)
         else:
             self._logger.error(f'Failed to deposit {quantity} {item_code}')
-            return 0
+            return
 
-    async def bank_withdraw(self, item_code: str, quantity: int) -> int:
+    async def bank_withdraw(self, item_code: str, quantity: int):
         data = await get_character_withdraw_from_bank(self.session, self.name, item_code, quantity)
         if data:
             _cooldown = data["cooldown"]["total_seconds"]
             self._logger.debug(f'{quantity} {item_code} withdrawn. Cooldown: {_cooldown} seconds')
-            return _cooldown
+            await asyncio.sleep(_cooldown)
         else:
             self._logger.error(f'Failed to withdraw {quantity} {item_code}')
-            return 0
+            return
 
-    async def perform_crafting(self, item_code: str, quantity: int) -> int:
+    async def perform_crafting(self, item_code: str, quantity: int):
         data = await get_character_perform_crafting(self.session, self.name, item_code, quantity)
         if data:
             _cooldown = data["cooldown"]["total_seconds"]
             gained_xp = data["details"]["xp"]
             self._logger.info(f'{quantity} {item_code} crafted. XP gained: {gained_xp}. Cooldown: {_cooldown} seconds')
-            return _cooldown
+            await asyncio.sleep(_cooldown)
         else:
             self._logger.error(f'Failed to craft {quantity} {item_code}')
-            return 0
+            return
 
-    async def perform_fighting(self) -> int:
+    async def perform_fighting(self):
         data = await get_character_perform_fighting(self.session, self.name)
         if data:
             _cooldown = data["cooldown"]["total_seconds"]
-            return _cooldown
+            await asyncio.sleep(_cooldown)
         else:
             self._logger.error(f'failed to perform fighting action.')
-            return 0
+            return
 
-    async def perform_gathering(self) -> int:
+    async def perform_gathering(self):
         data = await get_character_perform_gathering(self.session, self.name)
         if data:
             _cooldown = data["cooldown"]["total_seconds"]
-            return _cooldown
+            await asyncio.sleep(_cooldown)
         else:
             self._logger.error(f'failed to gather resources.')
-            return 0
+            return
 
-    async def perform_recycling(self, _item: Item, quantity: int) -> int:
+    async def perform_recycling(self, _item: Item, quantity: int):
 
         # SECURITY CHECK ON RARE ITEMS
         if _item.has_protected_ingredients():
             self._logger.warning(f' Item {_item.code} is rare so better not to recycle it.')
-            return 0
+            return
 
         data = await get_character_perform_recycling(self.session, self.name, _item.code, quantity)
         if data:
             _cooldown = data["cooldown"]["total_seconds"]
             self._logger.info(f'{quantity} {_item.code} recycled. Cooldown: {_cooldown} seconds')
-            return _cooldown
+            await asyncio.sleep(_cooldown)
         else:
             self._logger.error(f'failed to recycle {quantity} {_item.code}.')
-            return 0
+            return
 
     async def is_gatherable(self, resource_code) -> bool:
         return resource_code in [item.code for item in self.gatherable_items]
@@ -494,8 +488,7 @@ class Character(BaseModel):
         skill_name = self.task.details.get_skill_name()
         coords = await self.get_nearest_coords(content_type='workshop', content_code=skill_name)
         self._logger.debug(f'{self.name} > moving to workshop at {coords}')
-        cooldown_ = await self.move(*coords)
-        await asyncio.sleep(cooldown_)
+        await self.move(*coords)
 
     async def move_to_monster(self, monster_code: str = ""):
         monster_code = self.task.code if monster_code == "" else monster_code
@@ -504,14 +497,12 @@ class Character(BaseModel):
         else:
             coords = await self.get_nearest_coords(content_type='monster', content_code=monster_code)
         self._logger.debug(f'{self.name} > moving to monster {monster_code} at {coords}')
-        cooldown_ = await self.move(*coords)
-        await asyncio.sleep(cooldown_)
+        await self.move(*coords)
 
     async def move_to_task_master(self):
         coords = await self.get_nearest_coords(content_type='tasks_master', content_code='monsters')
         self._logger.debug(f'{self.name} > moving to tasks master at {coords}')
-        cooldown_ = await self.move(*coords)
-        await asyncio.sleep(cooldown_)
+        await self.move(*coords)
 
     async def get_current_equipments(self, _items: dict[str, Item]) -> dict[str, Item]:
         infos = await self.get_infos()
@@ -1067,39 +1058,33 @@ class Character(BaseModel):
             self._logger.info(f'fighting {self.task.code} ...')
             while await self.is_up_to_fight(is_event=self.task.is_event):  # TODO add dropped material count
                 # TODO decrement task total on each won combat
-                cooldown_ = await self.perform_fighting()
-                await asyncio.sleep(cooldown_)
+                await self.perform_fighting()
 
         elif self.task.type == TaskType.RESOURCES:
             if self.task.is_event:
-                cooldown_ = await self.move(self.task.x, self.task.y)
-                await asyncio.sleep(cooldown_)
+                await self.move(self.task.x, self.task.y)
 
                 self._logger.info(f'gathering {self.task.total} {self.task.code} ...')
                 while await self.is_up_to_gather(self.task.code, self.task.total) and await self.is_event_still_on():
-                    cooldown_ = await self.perform_gathering()
-                    await asyncio.sleep(cooldown_)
+                    await self.perform_gathering()
             else:
                 location_details = self.environment.get_item_dropping_location(self.task.code)
                 if not location_details:
                     return
                 location_coords = await self.get_nearest_coords('resource', location_details.code)
 
-                cooldown_ = await self.move(*location_coords)
-                await asyncio.sleep(cooldown_)
+                await self.move(*location_coords)
 
                 self._logger.info(f'gathering {self.task.total} {self.task.code} ...')
                 while await self.is_up_to_gather(self.task.code, self.task.total):
-                    cooldown_ = await self.perform_gathering()
-                    await asyncio.sleep(cooldown_)
+                    await self.perform_gathering()
             # TODO decrement task total on each target resource gathered (in inventory)
 
         elif self.task.type == TaskType.RECYCLE:
             await self.withdraw_items_from_bank({self.task.code: self.task.total})
             if infos.get_inventory_item_quantity(self.task.code) >= self.task.total:
                 await self.move_to_workshop()
-                cooldown = await self.perform_recycling(self.task.details, self.task.total)
-                await asyncio.sleep(cooldown)
+                await self.perform_recycling(self.task.details, self.task.total)
 
         elif self.task.type == TaskType.ITEMS:
             # if all available at bank -> pick it and go craft
@@ -1134,8 +1119,7 @@ class Character(BaseModel):
 
             if nb_items_to_craft > 0:
                 await self.move_to_workshop()
-                cooldown_ = await self.perform_crafting(self.task.code, nb_items_to_craft)
-                await asyncio.sleep(cooldown_)
+                await self.perform_crafting(self.task.code, nb_items_to_craft)
 
     async def equip_for_task(self):
 
