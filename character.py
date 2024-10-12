@@ -282,7 +282,8 @@ class Character(BaseModel):
         return up_to_fight
 
     async def is_at_spawn_place(self) -> bool:
-        current_location = await self.get_current_location()
+        infos = await self.get_infos()
+        current_location = infos.get_current_location()
         if current_location == SPAWN_COORDINATES:
             self._logger.debug(f'is already at spawn place - likely killed by a monster')
             return True
@@ -303,23 +304,6 @@ class Character(BaseModel):
             infos = await self.get_infos()
             cooldown_ = await self.perform_fighting()
             await asyncio.sleep(cooldown_)
-
-    async def get_skill_level(self, _skill: str = None) -> int:
-        # FIXME
-        infos = await self.get_infos()
-        if _skill == 'mob':
-            _skill = ''
-        elif _skill == 'food':
-            _skill = "cooking"
-        return infos.get_skill_level(_skill)
-
-    async def get_level(self) -> int:
-        infos = await self.get_infos()
-        return infos.level
-
-    async def get_current_location(self) -> tuple[int, int]:
-        infos = await self.get_infos()
-        return int(infos.x), int(infos.y)
 
     async def complete_task(self, session: ClientSession, name: str):
         url = f"{SERVER}/my/{name}/action/task/complete"
@@ -358,7 +342,8 @@ class Character(BaseModel):
             self._logger.error(f'failed to get new task.')
 
     async def move(self, x, y) -> int:
-        current_location = await self.get_current_location()
+        infos = await self.get_infos()
+        current_location = infos.get_current_location()
         if current_location == (x, y):
             self._logger.debug(f'is already at the location ({x}, {y})')
             return 0
@@ -376,6 +361,9 @@ class Character(BaseModel):
             return 0
 
     async def get_nearest_coords(self, content_type: str, content_code: str) -> tuple[int, int]:
+
+        infos = await self.get_infos()
+
         if content_type == 'workshop' and content_code == 'fishing':
             content_code = 'cooking'
         resource_locations = await get_all_maps(
@@ -396,7 +384,7 @@ class Character(BaseModel):
         min_dist = 999999
         for resource_loc in resource_locations:
             res_x, res_y = int(resource_loc['x']), int(resource_loc['y'])
-            character_location_x, character_location_y = await self.get_current_location()
+            character_location_x, character_location_y = infos.get_current_location()
             dist_to_loc = (res_x - character_location_x) ** 2 + (res_y - character_location_y) ** 2
             if dist_to_loc < min_dist:
                 min_dist = dist_to_loc
@@ -719,10 +707,11 @@ class Character(BaseModel):
         await self.equip_best_consumables()
 
     async def get_eligible_bank_consumables(self) -> list[Item]:
+        infos = await self.infos()
         return [
             consumable
             for consumable in self.environment.consumables.values()
-            if await get_bank_item_qty(self.session, consumable.code) > 0 and consumable.level <= await self.get_level()
+            if await get_bank_item_qty(self.session, consumable.code) > 0 and consumable.level <= infos.get_level()
         ]
 
     async def get_2_best_consumables_including_equipped(self) -> list[Item]:
@@ -831,7 +820,7 @@ class Character(BaseModel):
         sorted_valid_equipments = sorted([
             equipment
             for equipment in available_equipments
-            if equipment.is_valid_equipment(await self.get_level())
+            if equipment.is_valid_equipment(infos.get_level())
         ], key=lambda x: x.level, reverse=True)
 
         self._logger.debug(f'may be equipped with {[e.code for e in sorted_valid_equipments]}')
@@ -915,8 +904,9 @@ class Character(BaseModel):
         Returns:
             dict[str, list[Item]]: A dictionary where keys are equipment slots and values are lists of Items.
         """
+        infos = await self.get_infos()
         bank_items = await get_bank_items(self.session)
-        level = await self.get_level()
+        level = infos.get_level()
 
         # Create a mapping from equipment slots to lists of equipments
         bank_equipments = {slot: [] for slot in EQUIPMENTS_SLOTS}
@@ -1284,6 +1274,9 @@ class Character(BaseModel):
         return Task()
 
     async def get_event_task(self) -> Task:
+
+        infos = await self.get_infos()
+
         all_events = await get_all_events(self.session)
         # TODO we need prioritization of events
         eligible_tasks = []
@@ -1304,7 +1297,7 @@ class Character(BaseModel):
             if event["name"] in ["Magic Apparition", "Strange Apparition"]:
                 resource_code = event["map"]["content"]["code"]
                 resource = self.environment.resource_locations[resource_code]
-                if await self.get_skill_level(resource.skill) >= resource.level:
+                if infos.get_skill_level(resource.skill) >= resource.level:
                     gathering_task = Task(
                         code=resource_code,
                         type=TaskType.RESOURCES,

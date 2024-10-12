@@ -95,6 +95,9 @@ class CharacterInfos(BaseModel):
     def get_level(self) -> int:
         return self.level
 
+    def get_current_location(self) -> tuple[int, int]:
+        return int(self.x), int(self.y)
+
     def get_gold_amount(self) -> int:
         return self.gold
 
