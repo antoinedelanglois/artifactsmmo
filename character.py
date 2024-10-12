@@ -221,7 +221,7 @@ class Character(BaseModel):
             await self.move_to_bank()
 
             if _items_details is None:
-                _items_details = await self.get_inventory_items()
+                _items_details = infos.get_inventory_items()
                 gold_amount = await self.get_gold_amount()
                 if gold_amount > 0:
                     _items_details['money'] = gold_amount
@@ -266,10 +266,11 @@ class Character(BaseModel):
             await asyncio.sleep(cooldown_)
 
     async def is_up_to_gather(self, _material_code: str, target_qty: int):
-        inventory_items, is_inventory_full = await asyncio.gather(
-            self.get_inventory_items(),
+        infos, is_inventory_full = await asyncio.gather(
+            get_all_infos(self.session, self.name),
             self.is_inventory_full()
         )
+        inventory_items = infos.get_inventory_items()
         gathered_qty = inventory_items.get(_material_code, 0)
         return not is_inventory_full and gathered_qty < target_qty
 
@@ -335,14 +336,6 @@ class Character(BaseModel):
     async def get_inventory_free_slots_nb(self) -> int:
         infos = await get_all_infos(self.session, self.name)
         return infos.get_inventory_max_size() - infos.get_inventory_occupied_slots_nb()
-
-    async def get_inventory_items(self) -> dict:
-        infos = await get_all_infos(self.session, self.name)
-        return {
-            i_infos.code: i_infos.quantity
-            for i_infos in infos.inventory
-            if i_infos.code != ""
-        }
 
     async def is_inventory_full(self) -> bool:
         return await self.get_inventory_free_slots_nb() == 0
@@ -434,7 +427,8 @@ class Character(BaseModel):
         return nearest_resource['x'], nearest_resource['y']
 
     async def get_inventory_quantity(self, _item_code: str) -> int:
-        inventory_items = await self.get_inventory_items()
+        infos = await get_all_infos(self.session, self.name)
+        inventory_items = infos.get_inventory_items()
         return inventory_items.get(_item_code, 0)
 
     async def get_nb_craftable_items(self, _item: Item, from_inventory: bool = False) -> int:
@@ -689,7 +683,8 @@ class Character(BaseModel):
                 material2craft_qty[material_code] = material2craft_qty.get(material_code, 0) + material_qty
 
         material2deposit_qty = {}
-        for inventory_item_code, inventory_qty in (await self.get_inventory_items()).items():
+        infos = await get_all_infos(self.session, self.name)
+        for inventory_item_code, inventory_qty in infos.get_inventory_items().items():
             if inventory_item_code not in material2craft_qty:
                 material2deposit_qty[inventory_item_code] = inventory_qty
             else:

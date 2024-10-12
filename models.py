@@ -105,6 +105,13 @@ class CharacterInfos(BaseModel):
     def get_inventory_max_size(self) -> int:
         return self.infos.inventory_max_items
 
+    def get_inventory_items(self) -> dict:
+        return {
+            i_infos.code: i_infos.quantity
+            for i_infos in self.infos.inventory
+            if i_infos.code != ""
+        }
+
     def get_skill_level(self, skill_name: str):
         if not skill_name:
             return self.level
