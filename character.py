@@ -5,7 +5,8 @@ from constants import (STOCK_QTY_OBJECTIVE, EXCLUDED_MONSTERS, SERVER, SPAWN_COO
                        EQUIPMENTS_SLOTS, SLOT_TYPE_MAPPING)
 from utils import select_best_equipment, select_best_equipment_set
 from api import (get_bank_item_qty, make_request, get_place_name, get_all_maps, get_all_events,
-                 get_all_items_quantities, needs_stock, get_all_map_item_qty, get_bank_items, get_all_infos)
+                 get_all_items_quantities, needs_stock, get_all_map_item_qty, get_bank_items, get_all_infos,
+                 get_character_move)
 import asyncio
 import logging
 
@@ -348,10 +349,7 @@ class Character(BaseModel):
             self._logger.debug(f'is already at the location ({x}, {y})')
             return 0
 
-        url = f"{SERVER}/my/{self.name}/action/move"
-        payload = {"x": x, "y": y}
-
-        data = await make_request(session=self.session, method='POST', url=url, payload=payload)
+        data = await get_character_move(self.session, self.name, x, y)
         if data:
             _cooldown = data["data"]["cooldown"]["total_seconds"]
             self._logger.debug(f'moved to ({await get_place_name(self.session, x, y)}). Cooldown: {_cooldown} seconds')

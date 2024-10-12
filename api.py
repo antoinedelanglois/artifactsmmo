@@ -128,6 +128,13 @@ async def make_request(session, method, url, params=None, payload=None, retries=
         return None
 
 
+async def get_character_move(session: ClientSession, name: str, x: int, y: int) -> dict:
+    url = f"{SERVER}/my/{name}/action/move"
+    payload = {"x": x, "y": y}
+    data = await make_request(session=session, method='POST', url=url, payload=payload)
+    return data["data"] if data else {}
+
+
 async def get_status(session: ClientSession) -> dict:
     url = f"{SERVER}/"
     data = await make_request(session=session, method='GET', url=url)
