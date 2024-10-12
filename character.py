@@ -197,14 +197,6 @@ class Character(BaseModel):
     async def can_be_vanquished(self, monster: Monster) -> bool:
         return monster.code in [m.code for m in self.fightable_monsters]
 
-    async def get_inventory_qty(self) -> dict[str, int]:
-        character_infos = await get_all_infos(self.session, self.name)
-        return {
-            slot.code: slot.quantity
-            for slot in character_infos.inventory
-            if slot.code != ""
-        }
-
     async def move_to_bank(self):
         bank_coords = await self.get_nearest_coords(
             content_type='bank',
@@ -1133,6 +1125,8 @@ class Character(BaseModel):
         self._logger.info(f" Here is the task to be executed: "
                           f"{self.task.code} ({self.task.type.value}: {self.task.total})")
 
+        infos = await get_all_infos(self.session, self.name)
+
         await self.equip_for_task()
 
         if self.task.type == TaskType.MONSTERS:
@@ -1186,7 +1180,7 @@ class Character(BaseModel):
 
             # Checking if all is available in inventory
             if all([
-                (await self.get_inventory_qty()).get(material_code, 0) >= material_qty
+                infos.get_inventory_item_quantity(material_code) >= material_qty
                 for material_code, material_qty in craft_details.items()
             ]):
                 pass

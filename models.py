@@ -92,6 +92,20 @@ class CharacterInfos(BaseModel):
     inventory_max_items: int = 100
     inventory: List[InventoryItem] = Field(default_factory=list)
 
+    def get_level(self) -> int:
+        return self.level
+
+    def get_inventory_dict(self) -> dict[str, int]:
+        return {
+            slot.code: slot.quantity
+            for slot in self.inventory
+            if slot.code != ""
+        }
+
+    def get_inventory_item_quantity(self, item_code: str) -> int:
+        inventory_dict = self.get_inventory_dict()
+        return inventory_dict.get(item_code, 0)
+
     def get_inventory_occupied_slots_nb(self) -> int:
         return sum([
             i_infos.quantity
