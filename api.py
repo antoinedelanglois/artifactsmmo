@@ -1,7 +1,7 @@
 import logging
 import asyncio
 from aiohttp import ClientSession
-from models import Status, Item, Monster, Resource, Announcement, BankDetails
+from models import Status, Item, Monster, Resource, Announcement, BankDetails, CharacterInfos
 from aiohttp.client_exceptions import ClientConnectorError
 import os
 import re
@@ -231,6 +231,17 @@ async def get_place_name(session: ClientSession, x: int, y: int) -> str:
     url = f"{SERVER}/maps/{x}/{y}"
     data = await make_request(session=session, method='GET', url=url)
     return data["data"]["content"]["code"]
+
+
+async def get_character_infos(session: ClientSession, name: str) -> dict:
+    url = f"{SERVER}/characters/{name}"
+    data = await make_request(session=session, method='GET', url=url)
+    return data["data"] if data else {}
+
+
+async def get_all_infos(session: ClientSession, name: str) -> CharacterInfos:
+    infos = await get_character_infos(session, name)
+    return CharacterInfos(**infos)
 
 
 async def get_my_characters(session: ClientSession) -> list:

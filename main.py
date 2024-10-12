@@ -13,7 +13,7 @@ async def run_bot(character_object: Character):
 
         await character_object.deposit_items_at_bank()
 
-        await character_object.manage_task()
+        await character_object.manage_task(character_object.session)
 
         # Check if game task is feasible, assign if it is / necessarily existing
         event_task = await character_object.get_event_task()
