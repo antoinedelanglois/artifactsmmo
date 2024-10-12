@@ -6,7 +6,8 @@ from constants import (STOCK_QTY_OBJECTIVE, EXCLUDED_MONSTERS, SERVER, SPAWN_COO
 from utils import select_best_equipment, select_best_equipment_set
 from api import (get_bank_item_qty, make_request, get_place_name, get_all_maps, get_all_events,
                  get_all_items_quantities, needs_stock, get_all_map_item_qty, get_bank_items, get_all_infos,
-                 get_character_move)
+                 get_character_move, get_character_exchange_tasks_coins, get_character_accept_new_task,
+                 get_character_cancel_task, get_character_complete_task)
 import asyncio
 import logging
 
@@ -307,8 +308,7 @@ class Character(BaseModel):
             await asyncio.sleep(cooldown_)
 
     async def complete_task(self, session: ClientSession, name: str):
-        url = f"{SERVER}/my/{name}/action/task/complete"
-        data = await make_request(session=session, method='POST', url=url)
+        data = await get_character_complete_task(self.session, self.name)
         if data:
             _cooldown = data["data"]["cooldown"]["total_seconds"]
             await asyncio.sleep(_cooldown)
@@ -316,8 +316,7 @@ class Character(BaseModel):
             self._logger.error(f'failed to complete task.')
 
     async def cancel_task(self):
-        url = f"{SERVER}/my/{self.name}/action/task/cancel"
-        data = await make_request(session=self.session, method='POST', url=url)
+        data = await get_character_cancel_task(self.session, self.name)
         if data:
             _cooldown = data["data"]["cooldown"]["total_seconds"]
             await asyncio.sleep(_cooldown)
@@ -325,8 +324,7 @@ class Character(BaseModel):
             self._logger.error(f'failed to cancel task.')
 
     async def accept_new_task(self):
-        url = f"{SERVER}/my/{self.name}/action/task/new"
-        data = await make_request(session=self.session, method='POST', url=url)
+        data = await get_character_accept_new_task(self.session, self.name)
         if data:
             _cooldown = data["data"]["cooldown"]["total_seconds"]
             await asyncio.sleep(_cooldown)
@@ -334,8 +332,7 @@ class Character(BaseModel):
             self._logger.error(f'failed to get new task.')
 
     async def exchange_tasks_coins(self):
-        url = f"{SERVER}/my/{self.name}/action/task/exchange"
-        data = await make_request(session=self.session, method='POST', url=url)
+        data = await get_character_exchange_tasks_coins(self.session, self.name)
         if data:
             _cooldown = data["data"]["cooldown"]["total_seconds"]
             await asyncio.sleep(_cooldown)

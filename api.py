@@ -135,6 +135,30 @@ async def get_character_move(session: ClientSession, name: str, x: int, y: int) 
     return data["data"] if data else {}
 
 
+async def get_character_accept_new_task(session: ClientSession, name: str) -> dict:
+    url = f"{SERVER}/my/{name}/action/task/new"
+    data = await make_request(session=session, method='POST', url=url)
+    return data["data"] if data else {}
+
+
+async def get_character_exchange_tasks_coins(session: ClientSession, name: str) -> dict:
+    url = f"{SERVER}/my/{name}/action/task/exchange"
+    data = await make_request(session=session, method='POST', url=url)
+    return data["data"] if data else {}
+
+
+async def get_character_cancel_task(session: ClientSession, name: str) -> dict:
+    url = f"{SERVER}/my/{name}/action/task/cancel"
+    data = await make_request(session=session, method='POST', url=url)
+    return data["data"] if data else {}
+
+
+async def get_character_complete_task(session: ClientSession, name: str) -> dict:
+    url = f"{SERVER}/my/{name}/action/task/complete"
+    data = await make_request(session=session, method='POST', url=url)
+    return data["data"] if data else {}
+
+
 async def get_status(session: ClientSession) -> dict:
     url = f"{SERVER}/"
     data = await make_request(session=session, method='GET', url=url)
