@@ -336,10 +336,6 @@ class Character(BaseModel):
         infos = await get_all_infos(self.session, self.name)
         return infos.get_inventory_max_size() - infos.get_inventory_occupied_slots_nb()
 
-    async def get_inventory_max_size(self) -> int:
-        infos = await get_all_infos(self.session, self.name)
-        return infos.inventory_max_items
-
     async def get_inventory_items(self) -> dict:
         infos = await get_all_infos(self.session, self.name)
         return {
@@ -446,7 +442,9 @@ class Character(BaseModel):
         craft_recipee = _item.get_craft_recipee()
         self._logger.debug(f' recipee for {_item.code} is {craft_recipee}')
 
-        nb_craftable_items = _item.get_max_taskable_quantity(await self.get_inventory_max_size())
+        infos = await get_all_infos(self.session, self.name)
+
+        nb_craftable_items = _item.get_max_taskable_quantity(infos.get_inventory_max_size())
 
         if from_inventory:  # Taking into account drops > update qty available in inventory
             for material_code, qty in craft_recipee.items():
@@ -1065,10 +1063,11 @@ class Character(BaseModel):
         return self.craftable_items[0]
 
     async def set_task(self, item: Item):
+        infos = await get_all_infos(self.session, self.name)
         self.task = Task(
             code=item.code,
             type=item.get_task_type(),
-            total=item.get_max_taskable_quantity(await self.get_inventory_max_size()),
+            total=item.get_max_taskable_quantity(infos.get_inventory_max_size()),
             details=item
         )
 
@@ -1077,10 +1076,12 @@ class Character(BaseModel):
         objective = await self.get_best_objective()     # FIXME get it depending on potential XP gain
         # FIXME could be checked here amongst craftable items first, then gatherable ones
 
+        infos = await get_all_infos(self.session, self.name)
+
         return Task(
             code=objective.code,
             type=objective.get_task_type(),
-            total=objective.get_max_taskable_quantity(await self.get_inventory_max_size()),
+            total=objective.get_max_taskable_quantity(infos.get_inventory_max_size()),
             details=objective
         )
 
