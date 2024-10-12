@@ -102,6 +102,9 @@ class CharacterInfos(BaseModel):
     def get_inventory_free_slots_nb(self) -> int:
         return self.get_inventory_max_size() - self.infos.get_inventory_occupied_slots_nb()
 
+    def is_inventory_full(self) -> bool:
+        return self.get_inventory_free_slots_nb() == 0
+
     def get_inventory_max_size(self) -> int:
         return self.infos.inventory_max_items
 

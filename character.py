@@ -266,23 +266,21 @@ class Character(BaseModel):
             await asyncio.sleep(cooldown_)
 
     async def is_up_to_gather(self, _material_code: str, target_qty: int):
-        infos, is_inventory_full = await asyncio.gather(
-            get_all_infos(self.session, self.name),
-            self.is_inventory_full()
-        )
+        infos = await get_all_infos(self.session, self.name)
         inventory_items = infos.get_inventory_items()
         gathered_qty = inventory_items.get(_material_code, 0)
-        return not is_inventory_full and gathered_qty < target_qty
+        return not infos.is_inventory_full() and gathered_qty < target_qty
 
     async def is_up_to_fight(self, is_event: bool = False) -> bool:
-        (got_enough_consumables, is_inventory_full, is_event_still_on,
+        (infos, got_enough_consumables, is_event_still_on,
          is_at_spawn_place, is_task_completed) = await asyncio.gather(
+            get_all_infos(self.session, self.name),
             self.got_enough_consumables(-1),
-            self.is_inventory_full(),
             self.is_event_still_on(),
             self.is_at_spawn_place(),
             self.is_task_completed()
         )
+        is_inventory_full = infos.is_inventory_full()
         if is_event:
             up_to_fight = got_enough_consumables and is_event_still_on and not (is_inventory_full or is_at_spawn_place)
         else:
@@ -309,7 +307,11 @@ class Character(BaseModel):
             return
         await self.move_to_monster(monster.code)
 
-        while not await self.is_inventory_full() and await self.get_inventory_quantity(material_code) < quantity_to_get:
+        infos = await get_all_infos(self.session, self.name)
+        is_inventory_full = infos.is_inventory_full()
+        while not is_inventory_full and await self.get_inventory_quantity(material_code) < quantity_to_get:
+            infos = await get_all_infos(self.session, self.name)
+            is_inventory_full = infos.is_inventory_full()
             cooldown_ = await self.perform_fighting()
             await asyncio.sleep(cooldown_)
 
@@ -332,13 +334,6 @@ class Character(BaseModel):
     async def get_level(self) -> int:
         infos = await get_all_infos(self.session, self.name)
         return infos.level
-
-    async def get_inventory_free_slots_nb(self) -> int:
-        infos = await get_all_infos(self.session, self.name)
-        return infos.get_inventory_max_size() - infos.get_inventory_occupied_slots_nb()
-
-    async def is_inventory_full(self) -> bool:
-        return await self.get_inventory_free_slots_nb() == 0
 
     async def get_current_location(self) -> tuple[int, int]:
         infos = await get_all_infos(self.session, self.name)
@@ -1235,7 +1230,8 @@ class Character(BaseModel):
                 qty_at_bank = await get_bank_item_qty(self.session, item_code)
                 if qty_at_bank > 0:
                     # If yes, withdraw them and get to workshop to recycle, before getting back to bank to deposit all
-                    nb_free_inventory_slots = await self.get_inventory_free_slots_nb()
+                    infos = await get_all_infos(self.session, self.name)
+                    nb_free_inventory_slots = infos.get_inventory_free_slots_nb()
                     recycling_qty = min(qty_at_bank, nb_free_inventory_slots // 2)  # Need room when recycling
 
                     # set recycling task
@@ -1248,7 +1244,8 @@ class Character(BaseModel):
 
             recycle_details = await self.get_unnecessary_equipments()
             for item_code, recycling_qty in recycle_details.items():
-                nb_free_inventory_slots = await self.get_inventory_free_slots_nb()
+                infos = await get_all_infos(self.session, self.name)
+                nb_free_inventory_slots = infos.get_inventory_free_slots_nb()
                 recycling_qty = min(recycling_qty, nb_free_inventory_slots // 2)  # Need room when recycling
 
                 # set recycling task
