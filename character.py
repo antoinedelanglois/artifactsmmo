@@ -567,11 +567,6 @@ class Character(BaseModel):
         cooldown_ = await self.move(*coords)
         await asyncio.sleep(cooldown_)
 
-    # TODO use enum for _equipment_slot
-    async def get_equipment_code(self, _equipment_slot: str) -> str:
-        infos = await get_all_infos(self.session, self.name)
-        return infos.get_slot_content(_equipment_slot)
-
     async def get_current_equipments(self) -> dict[str, Item]:
         infos = await get_all_infos(self.session, self.name)
         return {
@@ -581,7 +576,8 @@ class Character(BaseModel):
         }
 
     async def go_and_equip(self, _equipment_slot: str, _equipment_code: str):
-        current_equipment_code = await self.get_equipment_code(_equipment_slot)
+        infos = await get_all_infos(self.session, self.name)
+        current_equipment_code = infos.get_equipment_code(_equipment_slot)
         if current_equipment_code != _equipment_code:
             self._logger.debug(f' will change equipment for {_equipment_slot} '
                                f'from {current_equipment_code} to {_equipment_code}')
@@ -841,6 +837,7 @@ class Character(BaseModel):
         return [self.environment.consumables[c] if c else None for c in currently_equipped_consumables]
 
     async def equip_best_equipment(self, _equipment_slot: str, vulnerabilities: dict[str, int]):
+        infos = await get_all_infos(self.session, self.name)
         available_equipments = await self.get_bank_equipments_for_slot(_equipment_slot)
         self._logger.debug(f'available equipment at bank {[e.code for e in available_equipments]}')
         sorted_valid_equipments = sorted([
@@ -851,7 +848,7 @@ class Character(BaseModel):
 
         self._logger.debug(f'may be equipped with {[e.code for e in sorted_valid_equipments]}')
 
-        current_equipment_code = await self.get_equipment_code(_equipment_slot)
+        current_equipment_code = infos.get_equipment_code(_equipment_slot)
         if len(sorted_valid_equipments) == 0:
             return
         current_equipment_infos = self.environment.equipments.get(current_equipment_code, {})

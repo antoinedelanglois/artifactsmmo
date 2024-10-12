@@ -95,6 +95,10 @@ class CharacterInfos(BaseModel):
     def get_level(self) -> int:
         return self.level
 
+    # TODO use enum for _equipment_slot
+    def get_equipment_code(self, _equipment_slot: str) -> str:
+        return self.get_slot_content(_equipment_slot)
+
     def get_inventory_dict(self) -> dict[str, int]:
         return {
             slot.code: slot.quantity
