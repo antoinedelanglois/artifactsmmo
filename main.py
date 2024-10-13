@@ -80,14 +80,23 @@ async def main():
 
     try:
         async with ClientSession() as session:
-            # Parallelization of initial API calls
-            items, monsters, resources_data, maps_data, status, bank_details = await asyncio.gather(*[
-                asyncio.create_task(get_all_items(session)),
-                asyncio.create_task(get_all_monsters(session)),
-                asyncio.create_task(get_all_resources(session)),
-                asyncio.create_task(get_all_maps(session)),
-                asyncio.create_task(get_all_status(session)),
-                asyncio.create_task(get_all_bank_details(session))
+
+            async def safe_request(coro):
+                try:
+                    return await coro
+                except Exception as e:
+                    logging.error(f"Error in task: {str(e)}")
+                    return None  # or handle it differently
+
+        # Parallelization of initial API calls
+            items, monsters, resources_data, maps_data, status, bank_details, items_quantities = await asyncio.gather(*[
+                safe_request(get_all_items(session)),
+                safe_request(get_all_monsters(session)),
+                safe_request(get_all_resources(session)),
+                safe_request(get_all_maps(session)),
+                safe_request(get_all_status(session)),
+                safe_request(get_all_bank_details(session)),
+                safe_request(get_all_items_quantities(session))
             ])
 
             environment = Environment(
@@ -99,8 +108,7 @@ async def main():
                 bank_details=bank_details
             )
 
-            all_items_quantities = await get_all_items_quantities(session)
-            obsolete_equipments = environment.get_obsolete_equipments(all_items_quantities)
+            obsolete_equipments = environment.get_obsolete_equipments(items_quantities)
 
             # LOCAL_BANK = await get_bank_item_codes2qty(session)
 
