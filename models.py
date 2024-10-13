@@ -21,6 +21,11 @@ class InventoryItem(BaseModel):
     quantity: int
 
 
+class BankItem(BaseModel):
+    code: str
+    quantity: int
+
+
 class CharacterInfos(BaseModel):
     name: str
     skin: str

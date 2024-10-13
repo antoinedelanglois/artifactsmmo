@@ -1,7 +1,7 @@
 import logging
 import asyncio
 from aiohttp import ClientSession
-from models import Status, Item, Monster, Resource, Announcement, BankDetails, CharacterInfos
+from models import Status, Item, Monster, Resource, Announcement, BankDetails, CharacterInfos, BankItem
 from aiohttp.client_exceptions import ClientConnectorError
 import os
 import re
@@ -114,8 +114,7 @@ async def make_request(session, method, url, params=None, payload=None, retries=
                 logging.error(f"Request to {url} timed out. Retrying ({attempt + 1}/{retries})... ({e})")
                 await asyncio.sleep(min(2 ** attempt, 60))
             except ClientConnectorError as e:
-                logging.error(f"Connection error while accessing {url}: "
-                                  f"{str(e)}. Retrying ({attempt + 1}/{retries})...")
+                logging.error(f"Connection error while accessing {url}: {str(e)}. Retrying ({attempt+1}/{retries})...")
                 await asyncio.sleep(min(2 ** attempt, 60))
             except asyncio.CancelledError:
                 logging.error("Request was cancelled. Cleaning up...")
@@ -263,7 +262,8 @@ async def get_all_status(session: ClientSession) -> Status:
 
 async def get_all_items_quantities(session: ClientSession) -> dict[str, int]:
     # Start fetching bank items and character infos concurrently
-    bank_items, characters_infos = await asyncio.gather(get_bank_item_codes2qty(session), get_all_my_characters(session))
+    bank_items, characters_infos = await asyncio.gather(get_bank_item_codes2qty(session),
+                                                        get_all_my_characters(session))
 
     total_quantities = {}
 
@@ -400,13 +400,21 @@ async def get_all_bank_details(session: ClientSession) -> BankDetails:
 
 
 async def get_bank_item_codes2qty(session: ClientSession, params: dict = None) -> dict[str, int]:
+    bank_items = await get_bank_items(session, params)
+    return {
+        bank_item.code: bank_item.quantity
+        for bank_item in bank_items
+    }
+
+
+async def get_bank_items(session: ClientSession, params: dict = None) -> list[BankItem]:
     if params is None:
         params = {"size": 100}
     else:
         params.setdefault('size', 100)
 
     url = f"{SERVER}/my/bank/items/"
-    all_items = {}
+    all_items = []
     page = 1
 
     while True:
@@ -414,9 +422,7 @@ async def get_bank_item_codes2qty(session: ClientSession, params: dict = None) -
         data = await make_request(session=session, method='GET', url=url, params=params)
         if data and data["data"]:
             for item in data["data"]:
-                code = item['code']
-                qty = item['quantity']
-                all_items[code] = all_items.get(code, 0) + qty
+                all_items.append(BankItem(code=item['code'], quantity=item['quantity']))
             page += 1
             # Check if we've reached the last page
             if len(data["data"]) < params['size']:
