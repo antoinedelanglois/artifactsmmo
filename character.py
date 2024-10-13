@@ -32,7 +32,7 @@ class Character(BaseModel):
     craft_objectives: list[Item] = Field(default_factory=list)
     gather_objectives: list[Item] = Field(default_factory=list)
     fight_objectives: list[Monster] = Field(default_factory=list)
-    # infos: dict = Field(default_factory=dict)
+    # infos: CharacterInfos = Field(default_factory=dict)
 
     _logger: logging.Logger = PrivateAttr()
 
@@ -807,7 +807,7 @@ class Character(BaseModel):
         if data:
             _cooldown = data["cooldown"]["total_seconds"]
             self._logger.debug(f'{quantity} {slot_code} unequipped. Cooldown: {_cooldown} seconds')
-            return asyncio.sleep(_cooldown)
+            await asyncio.sleep(_cooldown)
         else:
             self._logger.error(f'Failed to unequip {quantity} {slot_code}')
             return

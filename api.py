@@ -228,26 +228,17 @@ async def get_character_perform_unequip(session: ClientSession, name: str, slot_
     return data["data"] if data else {}
 
 
-async def get_status(session: ClientSession) -> dict:
+async def _get_status(session: ClientSession) -> dict:
     url = f"{SERVER}/"
     data = await make_request(session=session, method='GET', url=url)
     return data["data"] if data else {}
 
 
 async def get_all_status(session: ClientSession) -> Status:
-    status_data = await get_status(session)
+    status_data = await _get_status(session)
     if not status_data:
         # Handle the case where status_data is None or empty
-        return Status(**{
-            "status": "unknown",
-            "version": "unknown",
-            "max_level": 40,
-            "characters_online": 0,
-            "server_time": datetime.now(UTC),
-            "announcements": [],
-            "last_wipe": "",
-            "next_wipe": ""
-        })
+        return Status()
 
     # Convert server_time to datetime if necessary
     server_time = status_data.get("server_time")
@@ -272,12 +263,7 @@ async def get_all_status(session: ClientSession) -> Status:
 
 async def get_all_items_quantities(session: ClientSession) -> dict[str, int]:
     # Start fetching bank items and character infos concurrently
-    bank_items_task = asyncio.create_task(get_bank_items(session))
-    characters_infos_task = asyncio.create_task(get_my_characters(session))
-
-    # Wait for both tasks to complete
-    bank_items = await bank_items_task
-    characters_infos = await characters_infos_task
+    bank_items, characters_infos = await asyncio.gather(get_bank_items(session), get_all_my_characters(session))
 
     total_quantities = {}
 
@@ -288,15 +274,13 @@ async def get_all_items_quantities(session: ClientSession) -> dict[str, int]:
     # Process characters' inventories and equipments
     for character in characters_infos:
         # Inventory items
-        for slot in character.get('inventory', []):
-            code = slot['code']
-            qty = slot['quantity']
-            if code:
-                total_quantities[code] = total_quantities.get(code, 0) + qty
+        for slot in character.inventory:
+            if slot.code:
+                total_quantities[slot.code] = total_quantities.get(slot.code, 0) + slot.quantity
 
         # Equipped items
         for equipment_slot in EQUIPMENTS_SLOTS:
-            code = character.get(f'{equipment_slot}_slot', '')
+            code = character.get_equipment_code(equipment_slot)
             if code:
                 total_quantities[code] = total_quantities.get(code, 0) + 1
 
@@ -344,10 +328,15 @@ async def get_all_infos(session: ClientSession, name: str) -> CharacterInfos:
     return CharacterInfos(**infos)
 
 
-async def get_my_characters(session: ClientSession) -> list:
+async def _get_my_characters(session: ClientSession) -> list:
     url = f"{SERVER}/my/characters"
     data = await make_request(session=session, method='GET', url=url)
     return data["data"] if data else []
+
+
+async def get_all_my_characters(session: ClientSession) -> list[CharacterInfos]:
+    list_infos = await _get_my_characters(session)
+    return [CharacterInfos(**infos) for infos in list_infos]
 
 
 async def get_all_resources(session: ClientSession, params: dict = None) -> dict[str, Resource]:

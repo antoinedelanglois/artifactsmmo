@@ -3,6 +3,8 @@ from typing import List, Optional
 from enum import Enum
 from datetime import datetime
 from constants import EQUIPMENTS_TYPES, SPAWN_COORDINATES
+import pytz
+UTC = pytz.UTC
 
 
 class TaskType(Enum):
@@ -449,14 +451,14 @@ class Announcement(BaseModel):
 
 
 class Status(BaseModel):
-    status: str
-    version: str
-    max_level: int
-    characters_online: int
-    server_time: datetime
-    announcements: List[Announcement]
-    last_wipe: str
-    next_wipe: str
+    status: str = "unknown"
+    version: str = "unknown"
+    max_level: int = 40
+    characters_online: int = 0
+    server_time: datetime = datetime.now(UTC)
+    announcements: List[Announcement] = Field(default_factory=list)
+    last_wipe: str = ""
+    next_wipe: str = ""
 
 
 class BankDetails(BaseModel):
