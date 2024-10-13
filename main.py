@@ -3,7 +3,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from aiohttp import ClientSession
 from character import Character
-from api import (get_bank_item_qty, get_all_maps, get_all_items, get_all_monsters, get_all_resources, get_all_status,
+from api import (get_all_maps, get_all_items, get_all_monsters, get_all_resources, get_all_status,
                  get_all_items_quantities, get_all_bank_details)
 from models import Environment, Task, TaskType
 
@@ -102,7 +102,7 @@ async def main():
             all_items_quantities = await get_all_items_quantities(session)
             obsolete_equipments = environment.get_obsolete_equipments(all_items_quantities)
 
-            # LOCAL_BANK = await get_bank_items(session)
+            # LOCAL_BANK = await get_bank_item_codes2qty(session)
 
             # Lich 96% > cursed_specter, gold_shield, cursed_hat, malefic_armor, piggy_pants, gold_boots, ruby_ring,
             # ruby_ring, ruby_amulet

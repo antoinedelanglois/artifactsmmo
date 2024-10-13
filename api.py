@@ -111,10 +111,10 @@ async def make_request(session, method, url, params=None, payload=None, retries=
                         error_msg = handle_incorrect_status_code(response.status)
                         logging.warning(f"Request to {url} failed. Status {response.status}. {error_msg}. Retrying...")
             except asyncio.TimeoutError as e:
-                logging.exception(f"Request to {url} timed out. Retrying ({attempt + 1}/{retries})... ({e})")
+                logging.error(f"Request to {url} timed out. Retrying ({attempt + 1}/{retries})... ({e})")
                 await asyncio.sleep(min(2 ** attempt, 60))
             except ClientConnectorError as e:
-                logging.exception(f"Connection error while accessing {url}: "
+                logging.error(f"Connection error while accessing {url}: "
                                   f"{str(e)}. Retrying ({attempt + 1}/{retries})...")
                 await asyncio.sleep(min(2 ** attempt, 60))
             except asyncio.CancelledError:
@@ -263,7 +263,7 @@ async def get_all_status(session: ClientSession) -> Status:
 
 async def get_all_items_quantities(session: ClientSession) -> dict[str, int]:
     # Start fetching bank items and character infos concurrently
-    bank_items, characters_infos = await asyncio.gather(get_bank_items(session), get_all_my_characters(session))
+    bank_items, characters_infos = await asyncio.gather(get_bank_item_codes2qty(session), get_all_my_characters(session))
 
     total_quantities = {}
 
@@ -399,7 +399,7 @@ async def get_all_bank_details(session: ClientSession) -> BankDetails:
     return BankDetails(**bank_details_data)
 
 
-async def get_bank_items(session: ClientSession, params: dict = None) -> dict:
+async def get_bank_item_codes2qty(session: ClientSession, params: dict = None) -> dict[str, int]:
     if params is None:
         params = {"size": 100}
     else:
@@ -434,7 +434,7 @@ async def needs_stock(session: ClientSession, _item: Item, total_quantities: dic
 
 
 async def get_bank_item_qty(session: ClientSession, _item_code: str) -> int:
-    res = await get_bank_items(session=session, params={"item_code": _item_code})
+    res = await get_bank_item_codes2qty(session=session, params={"item_code": _item_code})
     return res.get(_item_code, 0)
 
 

@@ -5,7 +5,7 @@ from constants import (STOCK_QTY_OBJECTIVE, EXCLUDED_MONSTERS, SPAWN_COORDINATES
                        EQUIPMENTS_SLOTS, SLOT_TYPE_MAPPING)
 from utils import select_best_equipment, select_best_equipment_set
 from api import (get_bank_item_qty, get_place_name, get_all_maps, get_all_events,
-                 get_all_items_quantities, needs_stock, get_all_map_item_qty, get_bank_items, get_all_infos,
+                 get_all_items_quantities, needs_stock, get_all_map_item_qty, get_bank_item_codes2qty, get_all_infos,
                  get_character_move, get_character_exchange_tasks_coins, get_character_accept_new_task,
                  get_character_cancel_task, get_character_complete_task, get_character_withdraw_from_bank,
                  get_character_deposit_at_bank, get_character_deposit_gold_at_bank, get_character_perform_crafting,
@@ -670,10 +670,10 @@ class Character(BaseModel):
         # Manage consumables
         await self.equip_best_consumables()
 
-    async def get_eligible_bank_consumables(self) -> list[Item]:
+    async def get_eligible_bank_consumable_codes(self) -> list[str]:
         infos = await self.get_infos()
         return [
-            consumable
+            consumable.code
             for consumable in self.environment.consumables.values()
             if await get_bank_item_qty(self.session, consumable.code) > 0 and consumable.level <= infos.get_level()
         ]
@@ -683,18 +683,17 @@ class Character(BaseModel):
         Fetches the two best consumables, including currently equipped ones, and ranks them.
         """
         # Fetch all consumables from the bank (TODO and inventory)
-        valid_consumables = await self.get_eligible_bank_consumables()
+        eligible_bank_consumable_codes = await self.get_eligible_bank_consumable_codes()
 
         # Add the currently equipped consumables to the list of valid ones (if they are equipped)
-        valid_consumables_codes = [c.code for c in valid_consumables]
         ordered_current_consumables = await self.get_ordered_current_consumables()
-        for current_consumable in ordered_current_consumables:
-            if current_consumable and current_consumable.code not in valid_consumables_codes:
-                valid_consumables.append(current_consumable)
 
         valid_consumables = [
-            consumable for consumable in valid_consumables
-            if not consumable.is_protected_consumable()
+            consumable
+            for consumable in ordered_current_consumables
+            if (consumable
+                and consumable.code not in eligible_bank_consumable_codes
+                and not consumable.is_protected_consumable())
         ]
 
         self._logger.debug(f' eligible consumables are {valid_consumables}')
@@ -830,7 +829,7 @@ class Character(BaseModel):
         Returns:
             list[Item]: A list of equipment items that can be equipped in the specified slot.
         """
-        bank_items = await get_bank_items(self.session)
+        bank_items = await get_bank_item_codes2qty(self.session)
         matching_equipments = []
 
         for item_code in bank_items.keys():
@@ -850,7 +849,7 @@ class Character(BaseModel):
             dict[str, list[Item]]: A dictionary where keys are equipment slots and values are lists of Items.
         """
         infos = await self.get_infos()
-        bank_items = await get_bank_items(self.session)
+        bank_items = await get_bank_item_codes2qty(self.session)
         level = infos.get_level()
 
         # Create a mapping from equipment slots to lists of equipments
@@ -919,7 +918,7 @@ class Character(BaseModel):
     async def get_unnecessary_equipments(self) -> dict[str, int]:
         recycle_details = {}
         # Apply only on those that can be crafted again
-        for item_code, item_qty in (await get_bank_items(self.session)).items():
+        for item_code, item_qty in (await get_bank_item_codes2qty(self.session)).items():
             # No recycling for planks and ores and cooking
             item = self.environment.items[item_code]
             if item_qty == 0 or item.is_not_recyclable():
@@ -1177,7 +1176,7 @@ class Character(BaseModel):
 
         # TODO only one loop on bank equipment
         # Check if we need slots in bank first
-        nb_occupied_bank_slots = len(await get_bank_items(self.session))
+        nb_occupied_bank_slots = len(await get_bank_item_codes2qty(self.session))
         if nb_occupied_bank_slots > self.environment.bank_details.slots - 5:
 
             for item_code in self.obsolete_equipments:
