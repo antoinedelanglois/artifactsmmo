@@ -876,11 +876,11 @@ class Character(BaseModel):
 
         return bank_equipments
 
-    async def manage_task(self, session: ClientSession):
+    async def manage_task(self):
         game_task = await self.get_game_task()
         # if task completed (or none assigned yet), go to get rewards and renew task
 
-        nb_tasks_coins = await get_bank_item_qty(session, "tasks_coin")
+        nb_tasks_coins = await get_bank_item_qty(self.session, "tasks_coin")
         nb_tasks_coins_lots = (nb_tasks_coins - 100)//6
         if nb_tasks_coins_lots > 0:
             await self.withdraw_items_from_bank({"tasks_coin": nb_tasks_coins_lots * 6})
@@ -973,6 +973,49 @@ class Character(BaseModel):
             total=item.get_max_taskable_quantity(infos.get_inventory_max_size()),
             details=item
         )
+
+    async def set_initial_task(self, priority_task: Task = None):
+
+        if priority_task:
+            self.task = priority_task
+            return
+
+        infos = await self.get_infos()
+
+        # Check if game task is feasible, assign if it is / necessarily existing
+        event_task = await self.get_event_task()
+        if event_task.type != TaskType.IDLE:
+            self.task = event_task
+            return
+        # No need to do game tasks if already a lot of task coins
+
+        game_task = await self.get_game_task()
+        if ((game_task.is_feasible(infos, self.max_fight_level)
+               and (await get_bank_item_qty(self.session, "tasks_coin") < 100))
+              or len(self.objectives) == 0):
+            self.task = game_task
+            return
+
+        recycling_task = await self.get_recycling_task()
+        if recycling_task.type != TaskType.IDLE:
+            self.task = recycling_task
+            return
+
+        # TODO get a task of leveling up on gathering if craftable items without autonomy
+        craft_for_equipping_task = await self.get_craft_for_equipping_task()
+        if craft_for_equipping_task.type != TaskType.IDLE:
+            self.task = craft_for_equipping_task
+            return
+
+        fight_for_leveling_up_task = await self.get_fight_for_leveling_up_task()
+        if fight_for_leveling_up_task.type != TaskType.IDLE and await infos.got_enough_consumables(1):
+            self.task = fight_for_leveling_up_task
+            return
+
+        if self.task.type == TaskType.IDLE:
+            # find and assign a valid task
+            self.task = await self.get_task()     # From a list?
+            return
 
     async def get_task(self) -> Task:
 

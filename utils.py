@@ -101,7 +101,7 @@ def select_best_support_equipment(
         if item_score > best_score:
             best_item = item
             best_score = item_score
-            logging.info(f"Best equipment updated to {best_item.code} with score {best_score}")
+            logging.info(f"Best equipment updated to {best_item.code} with score {best_score:.2f}")
 
     return best_item
 

@@ -11,36 +11,18 @@ from models import Environment, Task, TaskType
 async def run_bot(character_object: Character):
     while True:
 
-        character_infos = await character_object.get_infos()
-
         await character_object.deposit_items_at_bank()
 
-        await character_object.manage_task(character_object.session)
+        priority_task = Task(
+            code="scarecrow",
+            type=TaskType.MONSTERS,
+            total=99,
+            details=character_object.environment.monsters["scarecrow"]
+        )
 
-        # Check if game task is feasible, assign if it is / necessarily existing
-        event_task = await character_object.get_event_task()
-        # event_task = None
-        game_task = await character_object.get_game_task()
-        recycling_task = await character_object.get_recycling_task()
-        craft_for_equipping_task = await character_object.get_craft_for_equipping_task()
-        fight_for_leveling_up_task = await character_object.get_fight_for_leveling_up_task()
-        if event_task.type != TaskType.IDLE:
-            character_object.task = event_task
-        # No need to do game tasks if already a lot of task coins
-        elif ((game_task.is_feasible(character_infos, character_object.max_fight_level)
-              and (await get_bank_item_qty(character_object.session, "tasks_coin") < 100))
-              or len(character_object.objectives) == 0):
-            character_object.task = game_task
-        elif recycling_task.type != TaskType.IDLE:
-            character_object.task = recycling_task
-        # TODO get a task of leveling up on gathering if craftable items without autonomy
-        elif craft_for_equipping_task.type != TaskType.IDLE:
-            character_object.task = craft_for_equipping_task
-        elif fight_for_leveling_up_task.type != TaskType.IDLE and await character_infos.got_enough_consumables(1):
-            character_object.task = fight_for_leveling_up_task
-        elif character_object.task.type == TaskType.IDLE:
-            # find and assign a valid task
-            character_object.task = await character_object.get_task()     # From a list?
+        await character_object.manage_task()
+
+        await character_object.set_initial_task(priority_task)
 
         await character_object.execute_task()
 
