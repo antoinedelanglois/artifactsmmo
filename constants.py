@@ -9,11 +9,12 @@ SLOT_TYPE_MAPPING = {
     'boots': ['boots'],
     'ring': ['ring1', 'ring2'],
     'amulet': ['amulet'],
-    'artifact': ['artifact1', 'artifact2', 'artifact3']
+    # Manual management of artifacts
+    # 'artifact': ['artifact1', 'artifact2', 'artifact3']
 }
 EQUIPMENTS_TYPES = list(SLOT_TYPE_MAPPING.keys())
 EQUIPMENTS_SLOTS = [x for slot in SLOT_TYPE_MAPPING.values() for x in slot]
-EXCLUDED_MONSTERS = ["cultist_acolyte", "cultist_emperor", "lich", "bat"]
+EXCLUDED_MONSTERS = ["cultist_emperor", "bat"]
 SPAWN_COORDINATES = (0, 0)
 BANK_COORDINATES = (4, 1)
 STOCK_QTY_OBJECTIVE = 500

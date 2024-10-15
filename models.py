@@ -217,6 +217,10 @@ class Monster(BaseModel):
     def get_task_type() -> TaskType:
         return TaskType.MONSTERS
 
+    @staticmethod
+    def get_max_taskable_quantity(inventory_max_size: int) -> int:
+        return inventory_max_size
+
     def get_vulnerabilities(self) -> dict[str, int]:
         vulnerabilities = {
             'fire': self.res_fire,
@@ -227,6 +231,10 @@ class Monster(BaseModel):
 
         # FIXME
         if self.code == 'bandit_lizard':
+            vulnerabilities = {"water": 5}
+
+        # FIXME
+        if self.code == 'lich':
             vulnerabilities = {"water": 5}
 
         return vulnerabilities

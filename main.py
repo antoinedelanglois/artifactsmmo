@@ -79,8 +79,8 @@ async def main():
             async def safe_request(coro):
                 try:
                     return await coro
-                except Exception as e:
-                    logging.error(f"Error in task: {str(e)}")
+                except Exception as error:
+                    logging.error(f"Error in task: {str(error)}")
                     return None  # or handle it differently
 
         # Parallelization of initial API calls
@@ -120,7 +120,7 @@ async def main():
                     environment=environment,
                     obsolete_equipments=obsolete_equipments,
                     name='Kersh',
-                    max_fight_level=30,
+                    max_fight_level=33,
                     skills=['weaponcrafting', 'cooking', 'mining', 'woodcutting']
                 ),  # 'weaponcrafting', 'mining', 'woodcutting'
                 Character(
@@ -128,7 +128,7 @@ async def main():
                     environment=environment,
                     obsolete_equipments=obsolete_equipments,
                     name='Capu',
-                    max_fight_level=30,
+                    max_fight_level=33,
                     skills=['gearcrafting', 'woodcutting', 'mining']
                 ),  # 'gearcrafting',
                 Character(
@@ -136,7 +136,7 @@ async def main():
                     environment=environment,
                     obsolete_equipments=obsolete_equipments,
                     name='Brubu',
-                    max_fight_level=30,
+                    max_fight_level=33,
                     skills=['cooking', 'woodcutting', 'mining']
                 ),  # , 'fishing', 'mining', 'woodcutting'
                 Character(
@@ -144,7 +144,7 @@ async def main():
                     environment=environment,
                     obsolete_equipments=obsolete_equipments,
                     name='Crabex',
-                    max_fight_level=30,
+                    max_fight_level=33,
                     skills=['jewelrycrafting', 'mining', 'woodcutting']
                 ),  # 'jewelrycrafting', 'woodcutting', 'mining'
                 Character(
@@ -152,7 +152,7 @@ async def main():
                     environment=environment,
                     obsolete_equipments=obsolete_equipments,
                     name='JeaGa',
-                    max_fight_level=30,
+                    max_fight_level=33,
                     skills=['fishing', 'mining', 'woodcutting']
                 ),  # 'cooking', 'fishing'
             ]

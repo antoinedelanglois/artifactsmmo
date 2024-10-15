@@ -996,8 +996,8 @@ class Character(BaseModel):
 
         game_task = await self.get_game_task()
         if ((game_task.is_feasible(infos, self.max_fight_level)
-               and (await get_bank_item_qty(self.session, "tasks_coin") < 100))
-              or len(self.objectives) == 0):
+             and (await get_bank_item_qty(self.session, "tasks_coin") < 100))
+                or len(self.objectives) == 0):
             self.task = game_task
             return
 
