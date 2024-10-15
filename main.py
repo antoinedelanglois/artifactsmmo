@@ -5,7 +5,7 @@ from aiohttp import ClientSession
 from character import Character
 from api import (get_all_maps, get_all_items, get_all_monsters, get_all_resources, get_all_status,
                  get_all_items_quantities, get_all_bank_details)
-from models import Environment, Task, TaskType
+from models import Environment, Task
 
 
 async def run_bot(character_object: Character):
@@ -13,16 +13,11 @@ async def run_bot(character_object: Character):
 
         await character_object.deposit_items_at_bank()
 
-        priority_task = Task(
-            code="scarecrow",
-            type=TaskType.MONSTERS,
-            total=99,
-            details=character_object.environment.monsters["scarecrow"]
-        )
-
         await character_object.manage_task()
 
-        await character_object.set_initial_task(priority_task)
+        priority_target_code = ""
+
+        await character_object.set_initial_task(priority_target_code)
 
         await character_object.execute_task()
 

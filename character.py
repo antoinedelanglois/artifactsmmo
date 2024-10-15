@@ -964,19 +964,25 @@ class Character(BaseModel):
             return self.objectives[0]
         return self.craftable_items[0]
 
-    async def set_task(self, item: Item):
+    async def set_task(self, environment: Environment, articraft_code: str):
         infos = await self.get_infos()
+
+        if articraft_code in environment.monsters:
+            articraft = self.environment.monsters[articraft_code]
+        else:
+            articraft = self.environment.items[articraft_code]
+
         self.task = Task(
-            code=item.code,
-            type=item.get_task_type(),
-            total=item.get_max_taskable_quantity(infos.get_inventory_max_size()),
-            details=item
+            code=articraft.code,
+            type=articraft.get_task_type(),
+            total=articraft.get_max_taskable_quantity(infos.get_inventory_max_size()),
+            details=articraft
         )
 
-    async def set_initial_task(self, priority_task: Task = None):
+    async def set_initial_task(self, priority_target_code: str = None):
 
-        if priority_task:
-            self.task = priority_task
+        if priority_target_code:
+            await self.set_task(self.environment, priority_target_code)
             return
 
         infos = await self.get_infos()
@@ -1056,8 +1062,7 @@ class Character(BaseModel):
                 # Set material as craft target
                 self._logger.info(f' Resetting task to {material_code}')
                 # FIXME  Replace qty by full inventory capacity ?
-                material = self.environment.items[material_code]
-                await self.set_task(material)
+                await self.set_task(self.environment, material_code)
                 return await self.prepare_for_task()
             if await self.is_gatherable(material_code):
                 gather_details[material_code] = qty

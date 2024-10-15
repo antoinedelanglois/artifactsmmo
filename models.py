@@ -213,6 +213,10 @@ class Monster(BaseModel):
     max_gold: int
     drops: list[Drop]
 
+    @staticmethod
+    def get_task_type() -> TaskType:
+        return TaskType.MONSTERS
+
     def get_vulnerabilities(self) -> dict[str, int]:
         vulnerabilities = {
             'fire': self.res_fire,
