@@ -17,6 +17,9 @@ async def run_bot(character_object: Character):
 
         priority_target_code = ""
 
+        if character_object.name == "Brubu":
+            priority_target_code = "cultist_acolyte"
+
         await character_object.set_initial_task(priority_target_code)
 
         await character_object.execute_task()
