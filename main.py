@@ -17,8 +17,8 @@ async def run_bot(character_object: Character):
 
         priority_target_code = ""
 
-        if character_object.name == "Brubu":
-            priority_target_code = "cultist_acolyte"
+        # if character_object.name in ["Brubu", "JeaGa"]:
+        #     priority_target_code = "lich"   # "cultist_acolyte" / "lich"
 
         await character_object.set_initial_task(priority_target_code)
 
@@ -123,7 +123,7 @@ async def main():
                     environment=environment,
                     obsolete_equipments=obsolete_equipments,
                     name='Kersh',
-                    max_fight_level=33,
+                    max_fight_level=35,
                     skills=['weaponcrafting', 'cooking', 'mining', 'woodcutting']
                 ),  # 'weaponcrafting', 'mining', 'woodcutting'
                 Character(
@@ -131,7 +131,7 @@ async def main():
                     environment=environment,
                     obsolete_equipments=obsolete_equipments,
                     name='Capu',
-                    max_fight_level=33,
+                    max_fight_level=35,
                     skills=['gearcrafting', 'woodcutting', 'mining']
                 ),  # 'gearcrafting',
                 Character(
@@ -139,7 +139,7 @@ async def main():
                     environment=environment,
                     obsolete_equipments=obsolete_equipments,
                     name='Brubu',
-                    max_fight_level=33,
+                    max_fight_level=35,
                     skills=['cooking', 'woodcutting', 'mining']
                 ),  # , 'fishing', 'mining', 'woodcutting'
                 Character(
@@ -147,7 +147,7 @@ async def main():
                     environment=environment,
                     obsolete_equipments=obsolete_equipments,
                     name='Crabex',
-                    max_fight_level=33,
+                    max_fight_level=35,
                     skills=['jewelrycrafting', 'mining', 'woodcutting']
                 ),  # 'jewelrycrafting', 'woodcutting', 'mining'
                 Character(
@@ -155,7 +155,7 @@ async def main():
                     environment=environment,
                     obsolete_equipments=obsolete_equipments,
                     name='JeaGa',
-                    max_fight_level=33,
+                    max_fight_level=35,
                     skills=['fishing', 'mining', 'woodcutting']
                 ),  # 'cooking', 'fishing'
             ]
