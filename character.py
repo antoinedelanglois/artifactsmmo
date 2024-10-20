@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 from aiohttp import ClientSession
 from models import Environment, Task, Item, Monster, TaskType, CharacterInfos
 from constants import (STOCK_QTY_OBJECTIVE, EXCLUDED_MONSTERS, SPAWN_COORDINATES, BANK_COORDINATES,
-                       EQUIPMENTS_SLOTS, SLOT_TYPE_MAPPING)
+                       EQUIPMENTS_SLOTS, SLOT_TYPE_MAPPING, MIN_STOCK_TASKS_COIN)
 from utils import select_best_equipment, select_best_equipment_set
 from api import (get_bank_item_qty, get_place_name, get_all_maps, get_all_events,
                  get_all_items_quantities, needs_stock, get_all_map_item_qty, get_bank_item_codes2qty, get_all_infos,
@@ -880,7 +880,7 @@ class Character(BaseModel):
         # if task completed (or none assigned yet), go to get rewards and renew task
 
         nb_tasks_coins = await get_bank_item_qty(self.session, "tasks_coin")
-        nb_tasks_coins_lots = (nb_tasks_coins - 100)//6
+        nb_tasks_coins_lots = (nb_tasks_coins - MIN_STOCK_TASKS_COIN)//6
         if nb_tasks_coins_lots > 0:
             await self.withdraw_items_from_bank({"tasks_coin": nb_tasks_coins_lots * 6})
             await self.move_to_task_master()
@@ -996,7 +996,7 @@ class Character(BaseModel):
 
         game_task = await self.get_game_task()
         if ((game_task.is_feasible(infos, self.max_fight_level)
-             and (await get_bank_item_qty(self.session, "tasks_coin") < 100))
+             and (await get_bank_item_qty(self.session, "tasks_coin") < MIN_STOCK_TASKS_COIN))
                 or len(self.objectives) == 0):
             self.task = game_task
             return
